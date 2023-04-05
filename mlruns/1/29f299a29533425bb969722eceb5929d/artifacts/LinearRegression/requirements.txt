@@ -1,6 +1,0 @@
-mlflow<3,>=2.1
-category-encoders==2.6.0
-cloudpickle==2.2.0
-psutil==5.9.4
-scikit-learn==1.2.0
-typing-extensions==4.4.0
