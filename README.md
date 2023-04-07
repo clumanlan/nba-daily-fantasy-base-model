@@ -1,1 +1,3 @@
-# nba-daily-fantasy-base-model
+# NBA Daily Fantasy
+
+# Introduction: How to construct a winning lineup
