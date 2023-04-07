@@ -1,3 +1,3 @@
 # NBA Daily Fantasy
 
-# Introduction: How to construct a winning lineup
+## Introduction: How to construct a winning lineup
