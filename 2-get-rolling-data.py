@@ -8,13 +8,19 @@ from nba_api.stats.endpoints import playergamelog, commonplayerinfo, ScoreboardV
 from nba_api.stats.library.parameters import SeasonAll
 from nba_api.stats.static import players
 import awswrangler as wr
+from typing import List, Tuple
 
-# pull rolling data since last pulled
-# nba api seems to bblock cloud servers 
-
-
-def get_game_ids_pulled():
+def get_game_ids_pulled(s3_path: str) -> Tuple[pd.Series, str]:
+    """
+    Retrieves the unique game IDs and latest game date from game_stats data previously pulled.
     
+    Parameters:
+    s3_path (str): S3 path to the game_stats data.
+    
+    Returns:
+    Tuple[pd.Series, str]: A tuple containing a pandas Series of unique game IDs pulled and the latest game date in the data.
+    """
+
     s3_path = "s3://nbadk-model/game_stats"
 
     game_headers = wr.s3.read_parquet(
@@ -28,11 +34,14 @@ def get_game_ids_pulled():
 
     return game_ids_pulled, latest_game_date
 
+def get_game_data(start_date:str) -> Tuple[List[Tuple[pd.DataFrame, pd.DataFrame]], List[date]]:
+    """
+    Fetches game data from ScoreboardV2 API for each date from `start_date` to today's date.
+    :param start_date: A string representing the start date in the format YYYY-MM-DD.
+    :return: A tuple containing a list of tuples of Game Header and Team Game Line Scores dataframes and a list of dates where an error occurred.
+    """
 
-def get_recent_game_header_n_line_score(start_date, game_ids):
-
-    game_header_w_standings_list = []
-    team_game_line_score_list = []
+    game_data = []
     error_dates_list = []
 
     start_date = datetime.strptime(start_date, '%Y-%m-%d').date() - timedelta(days=5)
@@ -52,11 +61,10 @@ def get_recent_game_header_n_line_score(start_date, game_ids):
             series_standings.drop(['HOME_TEAM_ID', 'VISITOR_TEAM_ID', 'GAME_DATE_EST'], axis=1, inplace=True)
 
             game_header_w_standings = game_header.merge(series_standings, on='GAME_ID')
-            game_header_w_standings_list.append(game_header_w_standings)
 
             # each line rpresents a game-teamid
             team_game_line_score = scoreboard.line_score.get_data_frame()
-            team_game_line_score_list.append(team_game_line_score)
+            game_data.append(game_header_w_standings, team_game_line_score)
         
         except Exception as e:
             error_dates_list.append(current_date)
@@ -67,23 +75,52 @@ def get_recent_game_header_n_line_score(start_date, game_ids):
 
         time.sleep(1.1)
 
+    return game_data, error_dates_list
+
+
+def filter_game_data(game_data: List[Tuple[pd.DataFrame, pd.DataFrame]], game_ids: List[int]) -> Tuple[pd.DataFrame, pd.DataFrame, List[int]]:
+    """
+    Filters the game data by removing games that are not yet completed and have already been processed.
+
+    :param game_data: A list of tuples containing two dataframes representing game data.
+    :param game_ids: A list of integers representing game IDs that have already been processed.
+
+    :return: A tuple containing two dataframes representing the filtered game data and a list of Game IDS to pull
+    """
+    game_header_w_standings_list = []
+    team_game_line_score_list = []
+
+    for game_header_w_standings, team_game_line_score in game_data:
+        if game_header_w_standings['LIVE_PERIOD'].iloc[-1] >= 4 and game_header_w_standings['GAME_ID'].iloc[-1] not in game_ids:
+            game_header_w_standings_list.append(game_header_w_standings)
+            team_game_line_score_list.append(team_game_line_score)
+
     game_header_w_standings_complete_df = pd.concat(game_header_w_standings_list)
-    game_header_w_standings_complete_df = game_header_w_standings_complete_df[game_header_w_standings_complete_df['LIVE_PERIOD'] >= 4] # filter for games that are completed
-    
-    team_game_line_score_complete_df = pd.concat(team_game_line_score_list) 
-    team_game_line_score_complete_df = team_game_line_score_complete_df[team_game_line_score_complete_df['GAME_ID'].isin(game_header_w_standings_complete_df['GAME_ID'])]
-
-    game_header_w_standings_filtered = game_header_w_standings_complete_df[~game_header_w_standings_complete_df['GAME_ID'].isin(game_ids)]
-    team_game_line_score_filtered = team_game_line_score_complete_df[~team_game_line_score_complete_df['GAME_ID'].isin(game_ids)]
-
-
-    game_header_w_standings_filtered.reset_index(inplace=True)
-    team_game_line_score_filtered.reset_index(inplace=True)
-
-    game_ids = game_header_w_standings_filtered.GAME_ID.unique()
-    game_ids_df = pd.DataFrame(game_ids, columns=['game_id'])
+    team_game_line_score_complete_df = pd.concat(team_game_line_score_list)
+    game_ids = game_header_w_standings_complete_df.GAME_ID.unique()
 
     print(f'game ids to pull {len(game_ids)}')
+
+
+    return game_header_w_standings_complete_df, team_game_line_score_complete_df, game_ids
+
+
+
+
+
+def write_game_data_to_s3(game_header_w_standings_filtered: pd.DataFrame, team_game_line_score_filtered: pd.DataFrame, output_date: str = None) -> None:
+    """
+    Writes the filtered game data to S3 in Parquet format.
+
+    :param game_header_w_standings_filtered: A dataframe representing the filtered game header data.
+    :param team_game_line_score_filtered: A dataframe representing the filtered team game line score data.
+    :param output_date: A string representing the output date in YYYY-MM-DD format. Default is today's date.
+
+    """
+
+    if output_date is None:
+        output_date = datetime.today().strftime('%Y-%m-%d')
+
     print('Writing Game Header data to S3...........')
 
     wr.s3.to_parquet(
@@ -96,19 +133,19 @@ def get_recent_game_header_n_line_score(start_date, game_ids):
         path=f's3://nbadk-model/team_stats/game_line_score/game_line_score_{end_date_string}.parquet'
     )
 
-    wr.s3.to_parquet(
-        df=game_ids_df,
-        path=f's3://nbadk-model/api_ids/game_ids/game_id_{end_date_string}.parquet'
-    )
-    
-    return game_ids
 
+def get_boxscore_advanced(game_ids:list) ->  Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
+    """
+    Retrieves box score advanced statistics (e.g. PACE) for a list of game ids.
 
+    Args:
+        game_ids (List[str]): List of game ids to retrieve box score advanced statistics for.
 
-# GET BOXSCORE STATS ------------------------------------------------------------
-## these are just additional boxscore stat metrics (e.g. offesnive rating, usage percentge) 
-def get_boxscore_advanced(game_ids):
-    
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame, List[str]]: A tuple containing two dataframes - player_boxscore_advanced_stats_df
+        and team_boxscore_stats_advanced_df
+
+    """
     print('Starting Boxscore Advanced...................')
 
     today = date.today()
@@ -143,14 +180,25 @@ def get_boxscore_advanced(game_ids):
         loop_place += 1
         print(f'{(loop_place/game_len)*100} % complete')
         time.sleep(1)
-
+    
     player_boxscore_advanced_stats_df = pd.concat(player_boxscore_stats_list)
     team_boxscore_stats_advanced_df = pd.concat(team_boxscore_stats_list)
 
-    print(player_boxscore_advanced_stats_df.shape)
-    
-    player_ids = player_boxscore_advanced_stats_df.PLAYER_ID.unique()
-    player_ids_df = pd.DataFrame(player_ids, columns=['player_id'])
+    return player_boxscore_advanced_stats_df, team_boxscore_stats_advanced_df
+
+
+def write_boxscore_advanced_to_s3(player_boxscore_advanced_stats_df: pd.DataFrame, 
+                                  team_boxscore_stats_advanced_df: pd.DataFrame, 
+                                  today_string: str) -> None:
+    """
+    Writes the boxscore advanced data to S3 in Parquet format.
+
+    :param player_boxscore_advanced_stats_df: A dataframe representing the player boxscore advanced stats data.
+    :param team_boxscore_stats_advanced_df: A dataframe representing the team boxscore advanced stats data.
+
+        """
+    today = date.today()
+    today_string = today.strftime('%Y-%m-%d')
 
     print('Writing Boxscore Advanced to S3..........')
 
@@ -164,13 +212,25 @@ def get_boxscore_advanced(game_ids):
         path=f's3://nbadk-model/team_stats/boxscore_advanced/team_boxscore_advanced_stats_{today_string}.parquet'
     )
 
+    print('Finished writing Boxscore Advanced Team & Player to S3.')
+    return None
 
 
-def get_boxscore_traditional(game_ids):
-    
+def get_boxscore_traditional(game_ids: List[str]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Retrieve traditional boxscore data for given game IDs.
+
+    Parameters:
+    -----------
+    game_ids : list of str
+        List of game IDs for which boxscore data is to be retrieved.
+
+    Returns:
+    --------
+    Tuple of two dataframes: player-level boxscore data and team-level boxscore data.
+    """
+
     print('Starting Boxscore Traditional....................')
-    today = date.today()
-    today_string = today.strftime('%Y-%m-%d')
 
     boxscore_trad_player_list = []
     boxscore_trad_team_list = []
@@ -205,6 +265,20 @@ def get_boxscore_traditional(game_ids):
     boxscore_traditional_player_df['MIN'] = boxscore_traditional_player_df['MIN'].astype(str)
     boxscore_traditional_team_df['MIN'] = boxscore_traditional_team_df['MIN'].astype(str)
 
+    return boxscore_traditional_player_df, boxscore_traditional_team_df
+
+
+def write_boxscore_traditional_to_s3(boxscore_traditional_player_df: pd.DataFrame, boxscore_traditional_team_df: pd.DataFrame) -> None:
+    """
+    Writes boxscore traditional stats for players and teams to S3 in parquet format with today's date appended to the filename.
+
+    Parameters:
+        boxscore_traditional_player_df (pd.DataFrame): DataFrame of player boxscore traditional stats
+        boxscore_traditional_team_df (pd.DataFrame): DataFrame of team boxscore traditional stats
+    """
+    today = date.today()
+    today_string = today.strftime('%Y-%m-%d')
+
     print('Writing Boxscore Traditional to S3......................')
 
     wr.s3.to_parquet(
@@ -216,7 +290,10 @@ def get_boxscore_traditional(game_ids):
         df=boxscore_traditional_team_df,
         path=f's3://nbadk-model/team_stats/boxscore_traditional/boxscore_traditional_team_{today_string}.parquet'
         )
+    
+    print('Finished writing Boxscore Traditional Team & Player to S3.')
 
+    return None
 
 
 
