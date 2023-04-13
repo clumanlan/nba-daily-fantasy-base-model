@@ -10,6 +10,7 @@ from datetime import date
 from nba_api.stats.endpoints import ScoreboardV2
 from bs4 import BeautifulSoup
 import requests
+from nba_api.stats.static import teams
 
 # Define relevant features -----------------------------------
 
@@ -58,10 +59,20 @@ def create_aggregate_rolling_functions(window_num = 20, window_min = 1):
 
         return f_min, f_max, f_mean, f_std, f_sum
 
-# READ IN DATA & QUICK PROCESSING -------------------------------------------------------
-def get_current_season_games():
+def get_current_season_games() -> tuple:
+    """
+    Retrieves current season game headers, processes them, and creates a long table
+    to flag teams as home or away.
 
-    # Read in game headers first and figure out what current season we're in
+    Parameters:
+    game_stats_path (str): S3 path to game stats parquet file.
+
+    Returns:
+    tuple: A tuple containing the following:
+        - game_headers_df_processed_filtered (pd.DataFrame): Processed game headers for current season.
+        - game_home_away (pd.DataFrame): Long table to flag teams as home or away for each game.
+        - current_season_game_ids (np.ndarray): Array of unique game IDs for current season.
+    """
     game_stats_path = "s3://nbadk-model/game_stats"
 
     game_headers_df = wr.s3.read_parquet(
@@ -95,83 +106,125 @@ def get_current_season_games():
     game_headers_df_processed_filtered = game_headers_df_processed[rel_cols]
     game_headers_df_processed_filtered = game_headers_df_processed_filtered.drop_duplicates()
 
-
-    # create long table in order to flag teams that are home or away
+    # Create long table in order to flag teams that are home or away
     game_home_away = game_headers_df_processed[['GAME_ID','HOME_TEAM_ID', 'VISITOR_TEAM_ID']]
     game_home_away = pd.melt(game_home_away, id_vars='GAME_ID', value_name='TEAM_ID', var_name='home_away')
     game_home_away['home_away'] = game_home_away['home_away'].apply(lambda x: 'home' if x == 'HOME_TEAM_ID' else 'away')
 
     return game_headers_df_processed_filtered, game_home_away, current_season_game_ids
 
-def get_player_dfs(rel_game_ids):
 
+def get_player_dfs(rel_game_ids:list) -> tuple:
+    """
+    Get dataframes for player information, traditional box score stats, and advanced box score stats 
+    for a given set of game IDs.
+
+    Args:
+        rel_game_ids (list): List of relevant game IDs to filter box score dataframes by.
+
+    Returns:
+        tuple: A tuple of three pandas dataframes: player_info_df, boxscore_trad_player_df, and boxscore_adv_player_df.
+    """
+
+    # Read in player information data
     player_info_path = "s3://nbadk-model/player_info"
-
     player_info_df = wr.s3.read_parquet(
         path=player_info_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
 
+    # Clean player information data and rename columns
     player_info_df = player_info_df[['PERSON_ID', 'HEIGHT', 'POSITION']].drop_duplicates()
     player_info_df = player_info_df.rename({'PERSON_ID': 'PLAYER_ID'}, axis=1)
 
-
+    # Read in traditional box score data for players and filter by relevant game IDs
     boxscore_trad_player_path = "s3://nbadk-model/player_stats/boxscore_traditional/"
-
     boxscore_trad_player_df = wr.s3.read_parquet(
         path=boxscore_trad_player_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
-
     boxscore_trad_player_df['GAME_ID'] = boxscore_trad_player_df['GAME_ID'].astype(str)
     boxscore_trad_player_df = boxscore_trad_player_df[boxscore_trad_player_df['GAME_ID'].isin(rel_game_ids)]
 
+    # Read in advanced box score data for players and filter by relevant game IDs
     boxscore_adv_player_path = "s3://nbadk-model/player_stats/boxscore_advanced/"
-
     boxscore_adv_player_df = wr.s3.read_parquet(
         path=boxscore_adv_player_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
-
     boxscore_adv_player_df = boxscore_adv_player_df.drop_duplicates(subset=['GAME_ID','PLAYER_ID'])
     boxscore_adv_player_df = boxscore_adv_player_df[boxscore_adv_player_df['GAME_ID'].isin(rel_game_ids)]
 
     return player_info_df, boxscore_trad_player_df, boxscore_adv_player_df
 
-def get_team_level_dfs(rel_game_ids):
 
+
+def get_team_level_dfs(rel_game_ids:list) -> tuple:
+    """
+    Retrieve team level dataframes for the given game IDs.
+
+    Args:
+    rel_game_ids (list): A list of game IDs to filter the dataframes by.
+
+    Returns:
+    tuple: A tuple of two pandas dataframes, the first containing traditional team stats and the second containing advanced team stats.
+    """
+
+    # Read in traditional boxscore team stats
     boxscore_trad_team_path = "s3://nbadk-model/team_stats/boxscore_traditional/"
 
     boxscore_trad_team_df = wr.s3.read_parquet(
         path=boxscore_trad_team_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
 
+    # Convert GAME_ID to string and filter by rel_game_ids
     boxscore_trad_team_df['GAME_ID'] = boxscore_trad_team_df['GAME_ID'].astype(str)
     boxscore_trad_team_df = boxscore_trad_team_df.drop_duplicates(subset=['GAME_ID', 'TEAM_ID'])
-
     boxscore_trad_team_df = boxscore_trad_team_df[boxscore_trad_team_df['GAME_ID'].isin(rel_game_ids)]
 
+    # Read in advanced boxscore team stats
     boxscore_adv_team_path = "s3://nbadk-model/team_stats/boxscore_advanced/"
 
     boxscore_adv_team_df = wr.s3.read_parquet(
         path=boxscore_adv_team_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
 
+    # Drop duplicates and filter by rel_game_ids
     boxscore_adv_team_df = boxscore_adv_team_df.drop_duplicates(subset=['GAME_ID', 'TEAM_ID'])
     boxscore_adv_team_df = boxscore_adv_team_df[boxscore_adv_team_df['GAME_ID'].isin(rel_game_ids)]
 
     return boxscore_trad_team_df, boxscore_adv_team_df
 
 
-def create_player_level_boxscore(player_info_df, boxscore_trad_player_df, boxscore_adv_player_df, game_headers_df):
+def create_player_level_boxscore(player_info_df:pd.DataFrame,
+                                 boxscore_trad_player_df:pd.DataFrame,
+                                 boxscore_adv_player_df:pd.DataFrame, 
+                                 game_headers_df:pd.DataFrame):
+    """
+    Creates a complete player-level boxscore by merging player info, traditional player stats, advanced player stats, 
+    and game headers dataframes.
 
+    Parameters:
+        player_info_df (pandas.DataFrame): Dataframe containing player information, with columns: 'PLAYER_ID', 
+            'HEIGHT', and 'POSITION'.
+        boxscore_trad_player_df (pandas.DataFrame): Dataframe containing traditional player stats, with columns: 
+            'GAME_ID', 'TEAM_ID', 'PLAYER_ID', and other stats.
+        boxscore_adv_player_df (pandas.DataFrame): Dataframe containing advanced player stats, with columns: 'GAME_ID', 
+            'TEAM_ID', 'PLAYER_ID', and other stats.
+        game_headers_df (pandas.DataFrame): Dataframe containing game headers information, with columns: 'GAME_ID', 
+            'game_type', 'SEASON', and 'GAME_DATE_EST'.
+
+    Returns:
+        pandas.DataFrame: A complete player-level boxscore dataframe.
+    """
+    
     # Merge the player info dataframe to add player positions
     boxscore_complete_player = pd.merge(boxscore_trad_player_df, player_info_df, on='PLAYER_ID', how='left')
 
@@ -194,8 +247,24 @@ def create_player_level_boxscore(player_info_df, boxscore_trad_player_df, boxsco
     return boxscore_complete_player
 
 
-def create_team_level_boxscore(boxscore_trad_team_df, boxscore_adv_team_df, game_home_away, game_headers_df):
+def create_team_level_boxscore(boxscore_trad_team_df:pd.DataFrame, 
+                               boxscore_adv_team_df:pd.DataFrame,
+                               game_home_away:pd.DataFrame,
+                               game_headers_df:pd.DataFrame):
+    """
+    Creates a complete boxscore for team-level statistics by merging traditional and advanced stats and game information.
 
+    Args:
+        boxscore_trad_team_df (pd.DataFrame): Dataframe containing traditional boxscore stats for each team.
+        boxscore_adv_team_df (pd.DataFrame): Dataframe containing advanced boxscore stats for each team.
+        game_home_away (pd.DataFrame): Dataframe containing home and away team for each game.
+        game_headers_df (pd.DataFrame): Dataframe containing game information such as game type, season, and date.
+
+    Returns:
+        pd.DataFrame: A complete boxscore for team-level statistics with merged traditional and advanced stats and game information.
+    """
+
+    # Merge traditional and advanced stats dataframes on game id and team id
     boxscore_complete_team = pd.merge(
         boxscore_trad_team_df,
         boxscore_adv_team_df,
@@ -204,18 +273,121 @@ def create_team_level_boxscore(boxscore_trad_team_df, boxscore_adv_team_df, game
         suffixes=['', '_adv']
     )
 
+    # Subset game information dataframe to only include necessary columns
     game_info_df = game_headers_df[['GAME_ID', 'game_type', 'SEASON', 'GAME_DATE_EST']]
 
-
+    # Merge home and away team information with boxscore dataframe on game id and team id
     boxscore_complete_team = pd.merge(boxscore_complete_team, game_home_away, how='left', on=['GAME_ID', 'TEAM_ID'])
+
+    # Merge game information with boxscore dataframe on game id
     boxscore_complete_team = pd.merge(boxscore_complete_team, game_info_df, on='GAME_ID', how='left')
+
+    # Filter out pre-season and all-star games from the boxscore dataframe
     boxscore_complete_team = boxscore_complete_team[~boxscore_complete_team['game_type'].isin(['Pre-Season', 'All Star'])]
 
     return boxscore_complete_team
 
 
-def create_player_level_features(boxscore_complete_player, rel_num_cols):
+def reindex_by_date(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reindexes a DataFrame by date to fill in missing dates, and forwards fills the NaN values.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame containing dates.
+    
+    Returns:
+        pd.DataFrame: The reindexed DataFrame with missing dates filled.
+    """
+    
+    # Define range of dates based on minimum and maximum dates in DataFrame
+    dates = pd.date_range(df.GAME_DATE_EST.min(), df.GAME_DATE_EST.max())
+    
+    # Reindex the DataFrame by date and forward fill missing values
+    return df.reindex(dates).ffill()
 
+
+def lag_player_values(df: pd.DataFrame, rel_num_cols: list) -> pd.DataFrame:
+    """
+    Creates lagged player statistics by shifting numerical columns in a DataFrame based on specified groups.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame containing player statistics.
+        rel_num_cols (List[str]): A list of numerical column names in the DataFrame to be shifted.
+    
+    Returns:
+        pd.DataFrame: The DataFrame with lagged player statistics added as new columns.
+    """
+    
+    # Sort the DataFrame by game date
+    df = df.sort_values(['GAME_DATE_EST'])
+    
+    # Create lagged columns by grouping on specified columns and shifting numerical columns by 1
+    df = (
+        df.assign(**{
+            f'player_{col}_lagged': df.groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].shift(1)
+            for col in rel_num_cols})
+        .reset_index(drop=True)
+    )
+    
+    # Get list of lagged column names
+    lagged_cols =  list(df.columns[df.columns.str.endswith('_lagged')])
+    
+    # Select columns to keep in output
+    df = df[['PLAYER_ID', 'GAME_ID'] + lagged_cols]
+
+    return df
+
+
+def create_lagged_player_rolling_agg_stats(df: pd.DataFrame, rel_num_cols: list) -> pd.DataFrame:
+    """
+    Creates lagged player statistics by shifting numerical columns in a DataFrame based on specified groups and aggregating
+    with multiple summary statistics.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame containing player statistics.
+        rel_num_cols (List[str]): A list of numerical column names in the DataFrame to be shifted and aggregated.
+    
+    Returns:
+        pd.DataFrame: The DataFrame with lagged player statistics added as new columns.
+    """
+    
+    # Sort the DataFrame by game date
+    df = df.sort_values(['GAME_DATE_EST'])
+    
+    # Create lagged columns by grouping on specified columns and shifting numerical columns by 1
+    df = (
+        df.assign(**{
+            f'player_{col}_lagged': df.groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].shift(1)
+            for col in rel_num_cols})
+        .reset_index(drop=True)
+    )
+    
+    # Drop original numerical columns
+    df.drop(rel_num_cols, axis=1, inplace=True)
+    
+    # Define list of summary statistics and names
+    function_list = [f_min, f_max, f_mean, f_std, f_sum]
+    function_name = ['min', 'max', 'mean', 'std', 'sum']
+    
+    # Iterate over lagged columns and summary statistics to create new columns
+    for col in df.columns[df.columns.str.endswith('_lagged')]:
+        for i in range(len(function_list)):
+            df[(col + '_%s' % function_name[i])] = df.sort_values(['GAME_DATE_EST']).groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].apply(function_list[i])
+    
+    return df
+
+
+def create_player_level_features(boxscore_complete_player: pd.DataFrame, rel_num_cols: list) -> pd.DataFrame:
+    """
+    Creates player level features based on the boxscore data for each game they played.
+    
+    Parameters:
+    boxscore_complete_player (pd.DataFrame): Dataframe containing the boxscore data for all players and games.
+    rel_num_cols (list): List of columns containing relevant numerical values for lagging.
+    
+    Returns:
+    pd.DataFrame: Dataframe with player level features for each game they played.
+    """
     boxscore_complete_player['seconds_played'] = boxscore_complete_player['MIN'].apply(get_sec)
 
     boxscore_complete_player_processed = (boxscore_complete_player
@@ -236,7 +408,6 @@ def create_player_level_features(boxscore_complete_player, rel_num_cols):
     # Filter out players that did not play
     boxscore_complete_player_processed = boxscore_complete_player_processed[boxscore_complete_player_processed['seconds_played'] > 0]
 
-
     # Create Player Ranking
     boxscore_complete_player_processed = boxscore_complete_player_processed.sort_values(['GAME_DATE_EST'])
 
@@ -252,12 +423,8 @@ def create_player_level_features(boxscore_complete_player, rel_num_cols):
     rolling_avg = rolling_avg.reset_index().set_index('level_2').sort_index()
     boxscore_complete_player_processed['fantasy_points_lagged_mean'] = rolling_avg['fantasy_points_lagged_mean']
 
-    def reindex_by_date(df):
-        dates = pd.date_range(df.GAME_DATE_EST.min(), df.GAME_DATE_EST.max())
-        return df.reindex(dates).ffill()
-
+    # Create rolling player ranking
     player_season_calendar_list = []
-
 
     for season in boxscore_complete_player_processed['SEASON_ID'].unique():
         df = boxscore_complete_player_processed[boxscore_complete_player_processed['SEASON_ID']==season]
@@ -280,24 +447,6 @@ def create_player_level_features(boxscore_complete_player, rel_num_cols):
     boxscore_complete_player_processed = boxscore_complete_player_processed.drop('fantasy_points_lagged',axis=1)
 
 
-    # Function to lag additional variables we created 
-    def lag_player_values(df, rel_num_cols):
-        
-        df = df.sort_values(['GAME_DATE_EST'])
-
-        df = (
-            df.assign(**{
-            f'player_{col}_lagged': df.groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].shift(1)
-            for col in rel_num_cols})
-            .reset_index(drop=True)
-        )
-
-        lagged_cols =  list(df.columns[df.columns.str.endswith('_lagged')])
-
-        df = df[['PLAYER_ID', 'GAME_ID'] + lagged_cols]
-
-        return df
-
     rel_num_cols_add = ['fantasy_points_rank_overall', 'rolling_games_played']
 
     add_player_lagged_stats = lag_player_values(boxscore_complete_player_processed, rel_num_cols_add)
@@ -307,37 +456,13 @@ def create_player_level_features(boxscore_complete_player, rel_num_cols):
 
     f_min, f_max, f_mean, f_std, f_sum = create_aggregate_rolling_functions()
 
-    def create_lagged_player_stats(df, rel_num_cols):
-        
-        df = df.sort_values(['GAME_DATE_EST'])
-
-        df = (
-            df.assign(**{
-            f'player_{col}_lagged': df.groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].shift(1)
-            for col in rel_num_cols})
-            .reset_index(drop=True)
-        )
-
-        df.drop(rel_num_cols, axis=1, inplace=True)
-
-        function_list = [f_min, f_max, f_mean, f_std, f_sum]
-        function_name = ['min', 'max', 'mean', 'std', 'sum']
-
-        for col in df.columns[df.columns.str.endswith('_lagged')]:
-            print(col)
-            for i in range(len(function_list)):
-                df[(col + '_%s' % function_name[i])] = df.sort_values(['GAME_DATE_EST']).groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'], group_keys=False)[col].apply(function_list[i])
-                print(function_name[i])
-
-        return df
-
 
     ## rel no lag columns ------------
     rel_cols_player_no_lag = ['GAME_ID', 'SEASON_ID', 'GAME_DATE_EST', 'is_starter', 'PLAYER_ID', 'PLAYER_NAME', 'START_POSITION', 'POSITION', 'TEAM_ID', 'fantasy_points']
 
     f_min, f_max, f_mean, f_std, f_sum = create_aggregate_rolling_functions()
     boxscore_complete_player_processed = boxscore_complete_player_processed[rel_cols_player_no_lag + rel_num_cols]
-    boxscore_complete_player_processed = create_lagged_player_stats(boxscore_complete_player_processed, rel_num_cols)
+    boxscore_complete_player_processed = create_lagged_player_rolling_agg_stats(boxscore_complete_player_processed, rel_num_cols)
 
     # Add in additional stats created earlier (games_played, fantasy_points_rank_overall)
     boxscore_complete_player_processed = pd.merge(boxscore_complete_player_processed, add_player_lagged_stats, on=['PLAYER_ID', 'GAME_ID'], how='left')
@@ -348,7 +473,61 @@ def create_player_level_features(boxscore_complete_player, rel_num_cols):
 
 # Create Team Level Features ------------------------------------------------------------------------ 
 
-def create_team_level_features(boxscore_complete_team, rel_num_cols):
+def create_lagged_team_stats(df: pd.DataFrame, rel_num_cols:list) -> pd.DataFrame:
+    """
+    Create lagged team stats and basic stats from them, same as player plus additional fantasy points.
+    
+    Args:
+    - df: pandas.DataFrame, input dataframe with team stats.
+    - rel_num_cols: list, relevant numerical columns to lag.
+    
+    Returns:
+    - pandas.DataFrame, the input dataframe with added lagged columns and basic stats.
+    """
+    # Sort the dataframe by game date in ascending order
+    df = df.sort_values(['GAME_DATE_EST'])
+
+    # Create lagged columns for relevant numerical columns by grouping them by team and season ID, then shifting them by 1 game
+    df = (
+        df.assign(**{
+        f'team_{col}_lagged': df.groupby(['TEAM_ID', 'SEASON_ID'], group_keys=False)[col].shift(1)
+        for col in rel_num_cols})
+        .reset_index(drop=True)
+    )
+
+    # Remove the original relevant numerical columns, as they are no longer needed
+    df.drop(rel_num_cols, axis=1, inplace=True)
+
+    # Define a list of functions to apply to the lagged columns to calculate basic stats
+    function_list = [f_min, f_max, f_mean, f_std, f_sum]
+    # Define a list of names for each basic stat
+    function_name = ['min', 'max', 'mean', 'std', 'sum']
+
+    # For each lagged column in the dataframe
+    for col in df.columns[df.columns.str.endswith('_lagged')]:
+        print(col)
+        # For each basic stat in the list of functions to apply
+        for i in range(len(function_list)):
+            # Apply the function to the lagged column by grouping by team and season ID, then add the basic stat column to the dataframe
+            df[(col + '_%s' % function_name[i])] = df.sort_values(['GAME_DATE_EST']).groupby(['TEAM_ID', 'SEASON_ID'], group_keys=False)[col].apply(function_list[i])
+            print(function_name[i])
+
+    # Return the updated dataframe with lagged columns and basic stats
+    return df
+
+
+
+def create_team_level_features(boxscore_complete_team:pd.DataFrame, rel_num_cols:list) -> pd.DataFrame:
+    """
+    Creates lagged team statistics and basic statistics from them, as well as additional fantasy points.
+
+    Args:
+    df (pandas.DataFrame): DataFrame containing the team statistics.
+    rel_num_cols (list): List of relevant numerical columns.
+
+    Returns:
+    pandas.DataFrame: DataFrame containing the lagged team statistics, basic statistics, and additional fantasy points.
+    """
 
     boxscore_complete_team['seconds_played'] = boxscore_complete_team['MIN'].apply(get_sec)
 
@@ -364,7 +543,7 @@ def create_team_level_features(boxscore_complete_team, rel_num_cols):
     # Get fantasy points allowed from other team
     fantasy_points_allowed = boxscore_complete_team_processed[['GAME_ID', 'TEAM_ID', 'fantasy_points_team']]
     boxscore_complete_team_processed = pd.merge(boxscore_complete_team_processed, fantasy_points_allowed, on='GAME_ID', suffixes=['', '_opposing'], how='left')
-    boxscore_complete_team_processed = boxscore_complete_team_processed[boxscore_complete_team_processed['TEAM_ID'] != boxscore_complete_team_processed['TEAM_ID_opposing']]
+    boxscore_complete_team_processed = boxscore_complete_team_processed[boxscore_complete_team_processed['TEAM_ID'].astype(str) != boxscore_complete_team_processed['TEAM_ID_opposing'].astype(str)]
 
     # Lag team fantasy points and opposing team fantasy points
     boxscore_complete_team_processed = boxscore_complete_team_processed.sort_values(['GAME_DATE_EST'])
@@ -383,10 +562,6 @@ def create_team_level_features(boxscore_complete_team, rel_num_cols):
 
     # Create team ranking of fantasy points scored & allowed
     boxscore_complete_team_processed[boxscore_complete_team_processed.index.duplicated()]
-
-    def reindex_by_date(df):
-        dates = pd.date_range(df.GAME_DATE_EST.min(), df.GAME_DATE_EST.max())
-        return df.reindex(dates).ffill()
 
     team_season_calendar_list = []
 
@@ -413,33 +588,6 @@ def create_team_level_features(boxscore_complete_team, rel_num_cols):
     team_season_lagged_ranking_df = team_season_lagged_ranking_df[['calendar_date', 'TEAM_ID', 'fantasy_points_rank_overall_lagged_team', 'fantasy_points_rank_overall_lagged_team_allowed']]
 
 
-
-    # Create lagged team stats and basic stats from them, same as player plus additional fantasy points
-
-    def create_lagged_team_stats(df, rel_num_cols):
-        
-        df = df.sort_values(['GAME_DATE_EST'])
-
-        df = (
-            df.assign(**{
-            f'team_{col}_lagged': df.groupby(['TEAM_ID', 'SEASON_ID'], group_keys=False)[col].shift(1)
-            for col in rel_num_cols})
-            .reset_index(drop=True)
-        )
-
-        df.drop(rel_num_cols, axis=1, inplace=True)
-
-        function_list = [f_min, f_max, f_mean, f_std, f_sum]
-        function_name = ['min', 'max', 'mean', 'std', 'sum']
-
-        for col in df.columns[df.columns.str.endswith('_lagged')]:
-            print(col)
-            for i in range(len(function_list)):
-                df[(col + '_%s' % function_name[i])] = df.sort_values(['GAME_DATE_EST']).groupby(['TEAM_ID', 'SEASON_ID'], group_keys=False)[col].apply(function_list[i])
-                print(function_name[i])
-
-        return df
-
     rel_team_cols_no_lag = ['GAME_ID', 'TEAM_ID', 'GAME_DATE_EST', 'SEASON_ID',  'home_away', 'game_type']
     rel_num_cols_team = rel_num_cols + ['fantasy_points_team']
 
@@ -450,60 +598,90 @@ def create_team_level_features(boxscore_complete_team, rel_num_cols):
     # Add ranking to the team boxscore
     boxscore_complete_team_processed = pd.merge(boxscore_complete_team_processed, team_season_lagged_ranking_df, left_on= ['GAME_DATE_EST', 'TEAM_ID'], right_on =['calendar_date', 'TEAM_ID'], how='left')
     boxscore_complete_team_processed = boxscore_complete_team_processed.drop(['SEASON_ID', 'SEASON_ID'], axis=1)
-
+    boxscore_complete_team_processed = pd.merge(boxscore_complete_team_processed, boxscore_complete_team_processed, on='GAME_ID', suffixes=['','_opposing'], how='left')
+    
+    boxscore_complete_team_processed = boxscore_complete_team_processed[boxscore_complete_team_processed['TEAM_ID'] != boxscore_complete_team_processed['TEAM_ID_opposing']]
+    
     return boxscore_complete_team_processed
 
 
 def pull_todays_games():
+    """
+    This function pulls today's NBA games from the NBA API and returns a dataframe with the game information.
 
+    Parameters:
+    date_param (str): a string in the format of 'YYYY-MM-DD' representing the date for which to pull games
+
+    Returns:
+    todays_games (pandas.DataFrame): a dataframe containing the following columns for each game:
+        - GAME_ID: a unique ID for each game
+        - SEASON: the season in which the game is being played
+        - GAME_DATE_EST: the date of the game
+        - home_away: a string indicating whether the team is playing at home or away
+        - TEAM_ID: the ID of the team playing in the game
+        - team_abb: the abbreviation of the team playing in the game
+    """
+    # Get today's date
     today = date.today().strftime('%Y-%m-%d')
+    
+    # Get scoreboard for today's games
     scoreboard = ScoreboardV2(game_date=today, league_id='00')
 
+    # Get game header and series standings data
     game_header = scoreboard.game_header.get_data_frame()
-    series_standings = scoreboard.series_standings.get_data_frame() # this is mising some records for some reason
+    series_standings = scoreboard.series_standings.get_data_frame()
 
-    game_home_away = game_header[['GAME_ID','HOME_TEAM_ID', 'VISITOR_TEAM_ID']]
-    game_home_away = pd.melt(game_home_away, id_vars='GAME_ID', value_name='TEAM_ID')
-    game_home_away['home_away'] = np.where(game_home_away['variable'] == 'HOME_TEAM_ID', 'home', 'away')
-    game_home_away.drop(['variable'], axis=1, inplace=True)
+    # Merge home and away team data into a single column
+    game_home_away = game_header[['GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID']]
+    game_home_away = pd.melt(game_home_away, id_vars='GAME_ID', value_name='TEAM_ID', var_name='home_away')
+    game_home_away['home_away'] = np.where(game_home_away['home_away'] == 'HOME_TEAM_ID', 'home', 'away')
     
-    from nba_api.stats.static import teams
+    # Get team ID and abbreviation data
     teams_json = teams.get_teams()
-    teams_df = pd.DataFrame(teams_json)
-    teams_df = teams_df[['id', 'abbreviation']]
+    teams_df = pd.DataFrame(teams_json)[['id', 'abbreviation']]
     teams_df.columns = ['TEAM_ID', 'team_abb']
+    
+    # Merge team abbreviation data into game_home_away data
+    game_home_away = game_home_away.merge(teams_df, how='left')
 
-    game_home_away = game_home_away.merge(teams_df,  how='left')
-
+    # Select relevant columns and rename columns for today's games data
     rel_cols = ['GAME_ID', 'SEASON', 'GAME_DATE_EST', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID']
-
-    # Pull teams that are set to play today
-    todays_game_header = game_header[rel_cols]
-    todays_game_header.drop_duplicates(inplace=True) 
-
+    todays_game_header = game_header[rel_cols].drop_duplicates()
     todays_game_header = todays_game_header.rename({'HOME_TEAM_ID': 'home', 'VISITOR_TEAM_ID': 'away'}, axis=1)
 
-
-    # melt the HOME_TEAM_ID and VISITOR_TEAM_ID columns into a single column
+    # Merge home and away team data into a single column for today's games data
     todays_games = pd.melt(todays_game_header, id_vars=['GAME_ID', 'SEASON', 'GAME_DATE_EST'],
                 value_vars=['home', 'away'],
                 var_name='home_away', value_name='TEAM_ID')
 
-    todays_games['TEAM_ID'] = todays_games['TEAM_ID'] .astype(str)
+    # Convert team ID data to string type
+    todays_games['TEAM_ID'] = todays_games['TEAM_ID'].astype(str)
 
     return todays_games
 
 
-
 def pull_todays_roster(todays_teams):
+    """
+    Pulls the roster of today's teams and their starting lineup information (if available).
+
+    Args:
+    - todays_teams (list of str): A list of team IDs (as strings) for which to pull roster information.
+
+    Returns:
+    - todays_roster_complete (pandas DataFrame): A DataFrame with roster information for all players on today's teams,
+      as well as a boolean flag indicating whether they are a starter for today's game (if available).
+      Columns include: PLAYER_ID, PLAYER_NAME, POSITION, and TEAM_ID.
+    """
 
     todays_roster_complete = []
 
     for id in todays_teams:
 
+        # Get roster information for each team
         roster = CommonTeamRoster(team_id=id).common_team_roster.get_data_frame()
         rel_roster_cols = ['PLAYER_ID', 'PLAYER', 'POSITION', 'TeamID']
         roster = roster[rel_roster_cols]
+
         todays_roster_complete.append(roster)
         print(f'processing team id {id}')
         time.sleep(0.67)
@@ -511,6 +689,7 @@ def pull_todays_roster(todays_teams):
     todays_roster_complete = pd.DataFrame(pd.concat(todays_roster_complete))
     todays_roster_complete.rename({'PLAYER':'PLAYER_NAME', 'TeamID':'TEAM_ID'}, axis=1, inplace=True)
 
+    # Get starting lineup information from rotowire.com
     url = "https://www.rotowire.com/basketball/nba-lineups.php"
     soup = BeautifulSoup(requests.get(url).text, "html.parser")
     
@@ -536,6 +715,7 @@ def pull_todays_roster(todays_teams):
 
 
 
+
 f_min, f_max, f_mean, f_std, f_sum = create_aggregate_rolling_functions()
 
 game_headers_df, game_home_away, current_season_game_ids = get_current_season_games()
@@ -548,60 +728,64 @@ boxscore_complete_team = create_team_level_boxscore(boxscore_trad_team_df, boxsc
 
 # Get latest record for each team
 boxscore_complete_team = create_team_level_features(boxscore_complete_team, rel_num_cols)
-boxscore_team_latest = boxscore_complete_team.sort_values(['GAME_DATE_EST'])
-boxscore_team_latest = boxscore_team_latest.loc[boxscore_team_latest.groupby('TEAM_ID')['GAME_DATE_EST'].idxmax()]
-boxscore_team_latest = boxscore_team_latest.drop(['GAME_ID', 'GAME_DATE_EST', 'home_away'], axis=1)
+boxscore_team_latest = boxscore_complete_team.loc[boxscore_complete_team.groupby('TEAM_ID')['GAME_DATE_EST'].idxmax()]
+boxscore_team_latest = boxscore_team_latest.drop(['GAME_ID',  'home_away'], axis=1)
+
 
 # Get teams playing today
 todays_game_headers = pull_todays_games()
 todays_game_headers = pd.merge(todays_game_headers, boxscore_team_latest, on='TEAM_ID', how='left')
 
-# Join to itself to get opposing team stats
-todays_game_headers = pd.merge(todays_game_headers, todays_game_headers, on='GAME_ID', suffixes=['','_opposing'], how='left')
-todays_game_headers = todays_game_headers[todays_game_headers['TEAM_ID'] != todays_game_headers['TEAM_ID_opposing']]
-
-
-
 
 # Player level processing -----------------------------
-
 # Get player level stats
 player_info_df, boxscore_trad_player_df, boxscore_adv_player_df = get_player_dfs(current_season_game_ids)
 boxscore_complete_player = create_player_level_boxscore(player_info_df, boxscore_trad_player_df, boxscore_adv_player_df, game_headers_df)
 boxscore_complete_player_processed = create_player_level_features(boxscore_complete_player, rel_num_cols)
 boxscore_complete_player_processed['TEAM_ID'] = boxscore_complete_player_processed['TEAM_ID'].astype(str)
 
-
 # Get latest player level stat for each player
-boxscore_complete_player_processed = boxscore_complete_player_processed.sort_values(['GAME_DATE_EST'])
-boxscore_player_latest = boxscore_complete_player_processed.loc[boxscore_complete_player_processed.groupby('PLAYER_ID')['GAME_DATE_EST'].idxmax()]
-boxscore_player_latest = boxscore_player_latest.drop(['GAME_ID', 'GAME_DATE_EST', 'POSITION', 'PLAYER_NAME', 'TEAM_ID'], axis=1)
-
+boxscore_player_latest = (
+    boxscore_complete_player_processed
+    .sort_values(['GAME_DATE_EST'])
+    .loc[boxscore_complete_player_processed.groupby('PLAYER_ID')['GAME_DATE_EST'].idxmax()]
+    .drop(['GAME_ID', 'GAME_DATE_EST', 'POSITION', 'PLAYER_NAME', 'TEAM_ID'], axis=1)
+)
 
 # Get players playing today
 todays_player_roster = pull_todays_roster(todays_game_headers['TEAM_ID'])
 todays_player_roster = pd.merge(todays_player_roster, boxscore_player_latest, on='PLAYER_ID', how='left')
 
+# Merge player and team dataframes
+combined_player_team_boxsccore_current_season = (
+    pd.merge(
+        boxscore_complete_player_processed,
+        boxscore_complete_team,
+        on=['TEAM_ID', 'GAME_ID'],
+        how='left'
+    )
+)
 
-# Merge player and team dataframes ------------------------------------------------
-combined_player_team_boxsccore_current_season = pd.merge(boxscore_complete_player_processed, boxscore_complete_team, on=['TEAM_ID', 'GAME_ID'], how='left')
-
+# Save combined data to S3
 today = date.today().strftime('%Y-%m-%d')
-
 wr.s3.to_parquet(
-        df=combined_player_team_boxsccore_current_season,
-        path=f's3://nbadk-model/processed/base-rolling/nba_base_processed_{today}.parquet'
-        )
+    df=combined_player_team_boxsccore_current_season,
+    path=f's3://nbadk-model/processed/base_model_processed/nba_base_processed_{today}.parquet'
+)
 
+# Merge latest player and team dataframes
 todays_player_roster['TEAM_ID'] = todays_player_roster['TEAM_ID'].astype(str)
-combined_player_team_boxscore_latest = pd.merge(todays_player_roster, todays_game_headers, how='left', on=['TEAM_ID'])
-combined_player_team_boxscore_latest = combined_player_team_boxscore_latest.dropna()
+combined_player_team_boxscore_latest = (
+    pd.merge(
+        todays_player_roster,
+        todays_game_headers,
+        how='left',
+        on=['TEAM_ID']
+    )
+    .dropna()
+    .rename(columns={'GAME_DATE_EST_x': 'GAME_DATE_EST'})
+)
 
-
-combined_player_team_boxscore_latest.to_parquet('projects/nba-daily-fantasy-base-model/boxscore_latest_temp.parquet')
-
-
-combined_player_team_boxscore_latest = pd.read_parquet('projects/nba-daily-fantasy-base-model/boxscore_latest_temp.parquet')
 
 # Load Linear Regression model -----------------------------------------------------------
 lr_run_id = '29f299a29533425bb969722eceb5929d'
@@ -609,7 +793,7 @@ model_uri = f"projects/nba-daily-fantasy-base-model/base_model/lr_base/"
 lr_base = mlflow.sklearn.load_model(model_uri)
 
 
-# Predict player's fantasy point
+# Predict player's fantasy points
 todays_fantasy_point_pred = lr_base.predict(combined_player_team_boxscore_latest)
 combined_player_team_boxscore_latest['fantasy_point_prediction'] = todays_fantasy_point_pred
 
@@ -618,3 +802,5 @@ wr.s3.to_parquet(
         df=combined_player_team_boxscore_latest,
         path=f's3://nbadk-model/predictions/base/linear_regression/nba_base_lr_pred_{today}.parquet'
         )
+
+

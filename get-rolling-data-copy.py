@@ -12,7 +12,7 @@ from typing import List, Tuple
 
 
 
-def get_game_ids_pulled() -> Tuple[pd.Series, str]:
+def get_game_ids_pulled(s3_path: str) -> Tuple[pd.Series, str]:
     """
     Retrieves the unique game IDs and latest game date from game_stats data previously pulled.
     
@@ -43,8 +43,7 @@ def get_game_data(start_date:str) -> Tuple[List[Tuple[pd.DataFrame, pd.DataFrame
     :return: A tuple containing a list of tuples of Game Header and Team Game Line Scores dataframes and a list of dates where an error occurred.
     """
 
-    game_header_w_standings_list = []
-    team_game_line_score_list = []
+    game_data = []
     error_dates_list = []
 
     start_date = datetime.strptime(start_date, '%Y-%m-%d').date() - timedelta(days=5)
@@ -59,7 +58,7 @@ def get_game_data(start_date:str) -> Tuple[List[Tuple[pd.DataFrame, pd.DataFrame
             scoreboard = ScoreboardV2(game_date=current_date, league_id='00')
 
             game_header = scoreboard.game_header.get_data_frame()
-            print(game_header.shape)
+
             series_standings = scoreboard.series_standings.get_data_frame()
             series_standings.drop(['HOME_TEAM_ID', 'VISITOR_TEAM_ID', 'GAME_DATE_EST'], axis=1, inplace=True)
 
@@ -67,9 +66,7 @@ def get_game_data(start_date:str) -> Tuple[List[Tuple[pd.DataFrame, pd.DataFrame
 
             # each line rpresents a game-teamid
             team_game_line_score = scoreboard.line_score.get_data_frame()
-            print(team_game_line_score.shape)
-            game_header_w_standings_list.append(game_header_w_standings)
-            team_game_line_score_list.append(team_game_line_score)
+            game_data.append(game_header_w_standings, team_game_line_score)
         
         except Exception as e:
             error_dates_list.append(current_date)
@@ -80,13 +77,10 @@ def get_game_data(start_date:str) -> Tuple[List[Tuple[pd.DataFrame, pd.DataFrame
 
         time.sleep(1.1)
 
-        game_header_w_standings_df = pd.concat(game_header_w_standings_list)
-        team_game_line_score_df = pd.concat(team_game_line_score_list)
-
-    return game_header_w_standings_df, team_game_line_score_df,  error_dates_list
+    return game_data, error_dates_list
 
 
-def filter_game_data(game_header_w_standings_df: pd.DataFrame, team_game_line_score_df: pd.DataFrame, game_ids_pulled: List[int]) -> Tuple[pd.DataFrame, pd.DataFrame, List[int]]:
+def filter_game_data(game_data: List[Tuple[pd.DataFrame, pd.DataFrame]], game_ids_pulled: List[int]) -> Tuple[pd.DataFrame, pd.DataFrame, List[int]]:
     """
     Filters the game data by removing games that are not yet completed and have already been processed.
 
@@ -95,16 +89,22 @@ def filter_game_data(game_header_w_standings_df: pd.DataFrame, team_game_line_sc
 
     :return: A tuple containing two dataframes representing the filtered game data and a list of Game IDS to pull
     """
+    game_header_w_standings_list = []
+    team_game_line_score_list = []
 
-    game_header_w_standings_df_filtered = game_header_w_standings_df[(game_header_w_standings_df['LIVE_PERIOD'] >= 4) & (~game_header_w_standings_df['GAME_ID'].isin(game_ids_pulled))]
-    team_game_line_score_df_filtered = team_game_line_score_df[team_game_line_score_df['GAME_ID'].isin(game_header_w_standings_df_filtered.GAME_ID)]
+    for game_header_w_standings, team_game_line_score in game_data:
+        if game_header_w_standings['LIVE_PERIOD'].iloc[-1] >= 4 and game_header_w_standings['GAME_ID'].iloc[-1] not in game_ids:
+            game_header_w_standings_list.append(game_header_w_standings)
+            team_game_line_score_list.append(team_game_line_score)
 
-    game_ids = game_header_w_standings_df_filtered.GAME_ID.unique()
+    game_header_w_standings_complete_df = pd.concat(game_header_w_standings_list)
+    team_game_line_score_complete_df = pd.concat(team_game_line_score_list)
+    game_ids = game_header_w_standings_complete_df.GAME_ID.unique()
 
     print(f'game ids to pull {len(game_ids)}')
 
 
-    return game_header_w_standings_df_filtered, team_game_line_score_df_filtered, game_ids
+    return game_header_w_standings_complete_df, team_game_line_score_complete_df, game_ids
 
 
 def write_game_data_to_s3(game_header_w_standings_filtered: pd.DataFrame, team_game_line_score_filtered: pd.DataFrame, output_date: str = None) -> None:
@@ -124,12 +124,12 @@ def write_game_data_to_s3(game_header_w_standings_filtered: pd.DataFrame, team_g
 
     wr.s3.to_parquet(
         df=game_header_w_standings_filtered,
-        path=f's3://nbadk-model/game_stats/game_header/game_header_{output_date}.parquet'
+        path=f's3://nbadk-model/game_stats/game_header/game_header_{end_date_string}.parquet'
     )
 
     wr.s3.to_parquet(
         df=team_game_line_score_filtered,
-        path=f's3://nbadk-model/team_stats/game_line_score/game_line_score_{output_date}.parquet'
+        path=f's3://nbadk-model/team_stats/game_line_score/game_line_score_{end_date_string}.parquet'
     )
 
     return None
@@ -302,10 +302,10 @@ def main():
     game_ids_pulled, latest_game_date = get_game_ids_pulled()
     
     # Get game data and error dates list
-    game_header_w_standings_df, team_game_line_score_df, error_dates_list = get_game_data(latest_game_date)
+    game_data, error_dates_list = get_game_data(latest_game_date)
     
     # Filter game data
-    game_header_w_standings_complete_df, team_game_line_score_complete_df, game_ids = filter_game_data(    game_header_w_standings_df, team_game_line_score_df, game_ids_pulled)
+    game_header_w_standings_complete_df, team_game_line_score_complete_df, game_ids = filter_game_data(game_data, game_ids_pulled)
     
     # Write game data to S3
     write_game_data_to_s3(game_header_w_standings_complete_df, team_game_line_score_complete_df)
@@ -317,5 +317,3 @@ def main():
     # Boxscore traditional stats
     boxscore_traditional_player_df, boxscore_traditional_team_df = get_boxscore_traditional(game_ids)
     write_boxscore_traditional_to_s3(boxscore_traditional_player_df, boxscore_traditional_team_df)
-
-
