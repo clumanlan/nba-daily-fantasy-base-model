@@ -59,7 +59,7 @@ def calculate_player_correlations(base_model_processed: pd.DataFrame, output_pat
 
         corr = corr.rename_axis(None).rename_axis(None, axis=1)
         corr = corr.stack().reset_index()
-        corr.columns = ['MAIN_PLAYER_ID', 'OTHER_PLAYER_ID', 'corr']
+        corr.columns = ['MAIN_PLAYER_ID','MAIN_PLAYER_NAME', 'OTHER_PLAYER_ID', 'OTHER_PLAYER_NAME', 'corr']
 
         corr = pd.DataFrame(corr)
 
