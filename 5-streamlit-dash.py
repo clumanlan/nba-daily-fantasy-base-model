@@ -80,160 +80,195 @@ st.set_page_config(page_title="Current Fantasy Lineup", layout="wide")
 tab1, tab2 = st.tabs(["Current Lineup", "Player Correlations"])
 
 with tab1: 
-    st.title("Current Fantasy Lineup")
+    col1, col2, col3 = st.columns([1, 3, 1])
 
-    # Optimization ---------------------------------------
+    with col1:
+        st.write(' ')
 
-    # Filter dataframe
-    
-    player_ids_to_remove = st.multiselect('Select Players to Remove:', player_pred_latest['PLAYER_NAME'])
-    player_pred_latest_filtered =  player_pred_latest[~player_pred_latest['PLAYER_NAME'].isin(player_ids_to_remove)]
-
-    player_ids = player_pred_latest_filtered['PLAYER_ID'].unique()
-    player_pred_latest_filtered = player_pred_latest_filtered.set_index('PLAYER_ID')
-
-    # Correlation filtered for players playing
-    player_correlations_filtered = player_correlations[player_correlations['corr']>=0.5]
-    player_correlations_filtered = player_correlations_filtered[(player_correlations_filtered['MAIN_PLAYER_ID'].isin(player_ids)) &  (player_correlations_filtered['OTHER_PLAYER_ID'].isin(player_ids))]
-
-    player_correlation_pairs = player_correlations_filtered[['MAIN_PLAYER_ID', 'OTHER_PLAYER_ID']].values.tolist()
-
-
-    lineup_lp_prob = LpProblem('dk_lineup', LpMaximize)
-
-    # create decision variables
-    player_vars = LpVariable.dicts('player', player_ids, cat = 'Binary')
-
-    # objective 
-    lineup_lp_prob += lpSum([player_pred_latest_filtered['fantasy_point_prediction'][i]*player_vars[i] for i in player_ids]), 'Objective Function'
-
-    # total salary constraints
-    lineup_lp_prob += lpSum([player_pred_latest_filtered['Salary'][i]*player_vars[i] for i in player_ids]) <= 50000
-
-    # roster 10 player constraints
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids]) == 8
-
-    # ensure at least on player from correlated pairs is included 
-    for pair in player_correlation_pairs:
-        lineup_lp_prob += player_vars[pair[0]] + player_vars[pair[1]] >= 2 # at least one player from each correlated pair must be included in the lineup
-
-    # lineup constraints 
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'G' in player_pred_latest_filtered['Roster Position'][i] ]) >= 3 
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'G' in player_pred_latest_filtered['Roster Position'][i] ]) <= 4
-
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'F' in player_pred_latest_filtered['Roster Position'][i] ]) >= 3
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'F' in player_pred_latest_filtered['Roster Position'][i] ]) <= 4
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'PG' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'SG' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'SF' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'PF' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'C' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
-    lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'C' in player_pred_latest_filtered['Roster Position'][i]]) <= 2
-
-    lineup_lp_prob.solve()
-
-    player_ids=[]
-    player_lineup_status=[]
-    for val in player_vars:
+    with col2:
             
-        player_ids.append(val)
-        player_lineup_status.append(player_vars[val].varValue)
+        st.title("Current Fantasy Lineup")
 
-    final_lineup = pd.DataFrame({"PLAYER_ID":player_ids,"Status":player_lineup_status})
-    final_lineup = final_lineup[final_lineup["Status"]==1].join(player_pred_latest_filtered, on = 'PLAYER_ID', how='left')
+        # Optimization ---------------------------------------
 
+        # Filter dataframe
+        
+        player_ids_to_remove = st.multiselect('Select Players to Remove:', player_pred_latest['PLAYER_NAME'])
+        player_pred_latest_filtered =  player_pred_latest[~player_pred_latest['PLAYER_NAME'].isin(player_ids_to_remove)]
 
-    final_lineup = final_lineup.drop(columns=['PLAYER_ID', 'Status', 'ID', 'Roster Position'], axis=1)
-    final_lineup['fantasy_point_prediction'] =  final_lineup['fantasy_point_prediction'].round()
-    final_lineup.fantasy_point_prediction.sum()
+        player_ids = player_pred_latest_filtered['PLAYER_ID'].unique()
+        player_pred_latest_filtered = player_pred_latest_filtered.set_index('PLAYER_ID')
 
-    col_defs = [{'headerName':'Player', 'field':'PLAYER_NAME','checkboxSelection': True,  'width': 120},
-                    {'headerName':'Position', 'field':'POSITION', 'width':90},
-                    {'headerName':'Starter', 'field':'is_starter', 'width':90},
-                    {'headerName':'Fantasy Point Prediction', 'field':'fantasy_point_prediction', 'width':120},
-                    {'headerName':'Avg Points Per Game', 'field':'AvgPointsPerGame', 'width':120},
-                    {'headerName':'Player FP Rank Overall', 'field':'player_fantasy_points_rank_overall_lagged', 'width':90},
-                    {'headerName':'Salary', 'field':'Salary', 'width':90}]
+        # Correlation filtered for players playing
+        player_correlations_filtered = player_correlations[player_correlations['corr']>=0.5]
+        player_correlations_filtered = player_correlations_filtered[(player_correlations_filtered['MAIN_PLAYER_ID'].isin(player_ids)) &  (player_correlations_filtered['OTHER_PLAYER_ID'].isin(player_ids))]
 
-
-    gb = GridOptionsBuilder.from_dataframe(final_lineup)
-    gridOptions = gb.build()
-    gridOptions['columnDefs'] = col_defs
+        player_correlation_pairs = player_correlations_filtered[['MAIN_PLAYER_ID', 'OTHER_PLAYER_ID']].values.tolist()
 
 
-    final_lineup_grid = AgGrid(final_lineup, 
-                gridOptions=gridOptions, 
-                enable_enterprise_modules=True, 
-                allow_unsafe_jscode=True, 
-                update_mode=GridUpdateMode.SELECTION_CHANGED)
+        lineup_lp_prob = LpProblem('dk_lineup', LpMaximize)
 
+        # create decision variables
+        player_vars = LpVariable.dicts('player', player_ids, cat = 'Binary')
+
+        # objective 
+        lineup_lp_prob += lpSum([player_pred_latest_filtered['fantasy_point_prediction'][i]*player_vars[i] for i in player_ids]), 'Objective Function'
+
+        # total salary constraints
+        lineup_lp_prob += lpSum([player_pred_latest_filtered['Salary'][i]*player_vars[i] for i in player_ids]) <= 50000
+
+        # roster 10 player constraints
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids]) == 8
+
+        # ensure at least on player from correlated pairs is included 
+        for pair in player_correlation_pairs:
+            lineup_lp_prob += player_vars[pair[0]] + player_vars[pair[1]] >= 2 # at least one player from each correlated pair must be included in the lineup
+
+        # lineup constraints 
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'G' in player_pred_latest_filtered['Roster Position'][i] ]) >= 3 
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'G' in player_pred_latest_filtered['Roster Position'][i] ]) <= 4
+
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'F' in player_pred_latest_filtered['Roster Position'][i] ]) >= 3
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'F' in player_pred_latest_filtered['Roster Position'][i] ]) <= 4
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'PG' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'SG' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'SF' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'PF' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'C' in player_pred_latest_filtered['Roster Position'][i]]) >= 1
+        lineup_lp_prob += lpSum([player_vars[i] for i in player_ids if 'C' in player_pred_latest_filtered['Roster Position'][i]]) <= 2
+
+        lineup_lp_prob.solve()
+
+        player_ids=[]
+        player_lineup_status=[]
+        for val in player_vars:
+                
+            player_ids.append(val)
+            player_lineup_status.append(player_vars[val].varValue)
+
+        final_lineup = pd.DataFrame({"PLAYER_ID":player_ids,"Status":player_lineup_status})
+        final_lineup = final_lineup[final_lineup["Status"]==1].join(player_pred_latest_filtered, on = 'PLAYER_ID', how='left')
+
+
+        final_lineup = final_lineup.drop(columns=['PLAYER_ID', 'Status', 'ID', 'Roster Position'], axis=1)
+        final_lineup['fantasy_point_prediction'] =  final_lineup['fantasy_point_prediction'].round()
+        final_lineup.fantasy_point_prediction.sum()
+
+        col_defs = [{'headerName':'Player', 'field':'PLAYER_NAME','checkboxSelection': True,  'width': 180},
+                        {'headerName':'Position', 'field':'POSITION', 'width':90},
+                        {'headerName':'Starter', 'field':'is_starter', 'width':90},
+                        {'headerName':'Fantasy Point Prediction', 'field':'fantasy_point_prediction', 'width':180, 'headerStyle':{'textAlign': 'center'}, 'cellStyle': {'textAlign': 'center'}},
+                        {'headerName':'Avg Points Per Game', 'field':'AvgPointsPerGame', 'width':180, 'headerStyle':{'textAlign': 'center'}, 'cellStyle': {'textAlign': 'center'}}, 
+                        {'headerName':'Player FP Rank Overall', 'field':'player_fantasy_points_rank_overall_lagged', 'width':180, 'headerStyle':{'textAlign': 'center'}, 'cellStyle': {'textAlign': 'center'}},
+                        {'headerName':'Salary', 'field':'Salary', 'width':90}]
+
+
+        gb = GridOptionsBuilder.from_dataframe(final_lineup)
+        gridOptions = gb.build()
+        gridOptions['columnDefs'] = col_defs
+
+        final_lineup_grid = AgGrid(final_lineup, 
+                    gridOptions=gridOptions, 
+                    enable_enterprise_modules=True, 
+                    allow_unsafe_jscode=True, 
+                    update_mode=GridUpdateMode.SELECTION_CHANGED)
 
     selected_rows = final_lineup_grid["selected_rows"]
+    
+    with col3:
+        st.write(' ')
 
     if len(selected_rows) != 0:
             
         selected_rows_df = pd.DataFrame(selected_rows)
-        players_selected = selected_rows_df['PLAYER_NAME']
+        player_selected = selected_rows_df['PLAYER_NAME']
 
-        filtered_base_df = base_model_processed[base_model_processed["PLAYER_NAME"].isin(players_selected)][['PLAYER_NAME','fantasy_points']]
+        filtered_base_df = base_model_processed[base_model_processed["PLAYER_NAME"].isin(player_selected)][['PLAYER_NAME','GAME_DATE_EST_x','fantasy_points']]
+        
+        player_selected_var = player_selected.iloc[0]
+        st.write(f"<h1 style='text-align: center; font-weight: bold; font-size: 24px;'>{player_selected_var}</h1>", unsafe_allow_html=True)
 
-        fig = px.histogram(filtered_base_df["fantasy_points"], nbins=30, opacity=0.5)
-        fig.update_layout(
-            title=f'{players_selected} Histogram Plot',
-            xaxis_title='Fantasy Poits',
-            yaxis_title='Observations'
-        )
-        st.plotly_chart(fig)
-
-with tab2:
-    #PLAYER CORRELATIONS
-    player_lookup_table = base_model_processed[['PLAYER_ID', 'PLAYER_NAME']].drop_duplicates()
-    player_correlations_filtered_wnames = pd.merge(player_correlations_filtered, player_lookup_table,
-                                                left_on='MAIN_PLAYER_ID', right_on='PLAYER_ID', how='left')
-    player_correlations_filtered_wnames =  pd.merge(player_correlations_filtered_wnames, player_lookup_table, 
-                                                left_on='OTHER_PLAYER_ID', right_on='PLAYER_ID', how='left')
-
-    player_correlations_filtered_wnames = player_correlations_filtered_wnames.drop(['PLAYER_ID_x', 'PLAYER_ID_y'], axis=1)
-    player_correlations_filtered_wnames = player_correlations_filtered_wnames.rename(columns={'PLAYER_NAME_x':'MAIN_PLAYER_NAME', 'PLAYER_NAME_y':'OTHER_PLAYER_NAME', 'TEAM_ID_x':'TEAM_ID'})
-
-    player_correlations_filtered_wnames = pd.merge(player_correlations_filtered_wnames, teams_lookup,  how='left')
-    player_correlations_filtered_wnames['players'] = player_correlations_filtered_wnames[['MAIN_PLAYER_NAME', 'OTHER_PLAYER_NAME']].apply(lambda x: '_'.join(sorted(x)), axis=1)
-    player_correlations_filtered_wnames = player_correlations_filtered_wnames.drop_duplicates(subset='players')
-    player_correlations_filtered_wnames = player_correlations_filtered_wnames[['team_full_name','MAIN_PLAYER_NAME', 'OTHER_PLAYER_NAME', 'corr']]
-    player_correlations_filtered_wnames['corr'] = player_correlations_filtered_wnames['corr'].round(2)
-    player_correlations_filtered_wnames = player_correlations_filtered_wnames.sort_values('corr', ascending=False)
-
-    jscode = JsCode("""
-        function(params) {
-            if (params.data.corr >= 0.7) {
-                return {
-            'color': 'grey',
-            'backgroundColor': '#abf7b1'
-                        }
-                    }
-                };
-                """)
-
-                
-    col_defs_corr = [{'headerName':'Team', 'field':'team_full_name', 'width': 120},
-                    {'headerName':'Player', 'field':'MAIN_PLAYER_NAME', 'width':180},
-                    {'headerName':'Player', 'field':'OTHER_PLAYER_NAME', 'width':180},
-                    {'headerName':'Fantasy Point Correlation', 'field':'corr', 'width':180}]
-
-
-    gb_corr = GridOptionsBuilder.from_dataframe(player_correlations_filtered_wnames)
-    gridOptions_corr = gb_corr.build()
-    gridOptions_corr['getRowStyle'] = jscode
-    gridOptions_corr['columnDefs'] = col_defs_corr
-
-
-    grid_response = AgGrid(
-        player_correlations_filtered_wnames,
-        gridOptions=gridOptions_corr,
-        allow_unsafe_jscode=True,
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_a = px.histogram(filtered_base_df["fantasy_points"], nbins=30, opacity=0.5)
+            fig_a.update_layout(
+                title='Player Fantsay Point Actual Histogram',
+                xaxis_title='Fantasy Poimts',
+                yaxis_title='Observations',
+                yaxis=dict(dtick=1)
             )
 
+            st.plotly_chart(fig_a)
+        
+        with col2:
+            fig_b = px.scatter(filtered_base_df, x="GAME_DATE_EST_x", y="fantasy_points", opacity=0.5)
+            fig_b.update_layout(
+                title='Player Fantasy Point Actual over Time',
+                xaxis_title='Game Date',
+                yaxis_title='Fantasy Points'
+            )
 
+            fig_b.update_traces(trendline="ols")
+
+            st.plotly_chart(fig_b)
+            
+
+with tab2:
+    col1, col2, col3 = st.columns([1, 3, 1])
+
+    with col1:
+        st.write(' ')
+
+    with col2:
+        st.write('Top Player Correlations')
+
+        #PLAYER CORRELATIONS
+        player_lookup_table = base_model_processed[['PLAYER_ID', 'PLAYER_NAME']].drop_duplicates()
+        player_correlations_filtered_wnames = pd.merge(player_correlations_filtered, player_lookup_table,
+                                                    left_on='MAIN_PLAYER_ID', right_on='PLAYER_ID', how='left')
+        player_correlations_filtered_wnames =  pd.merge(player_correlations_filtered_wnames, player_lookup_table, 
+                                                    left_on='OTHER_PLAYER_ID', right_on='PLAYER_ID', how='left')
+
+        player_correlations_filtered_wnames = player_correlations_filtered_wnames.drop(['PLAYER_ID_x', 'PLAYER_ID_y'], axis=1)
+        player_correlations_filtered_wnames = player_correlations_filtered_wnames.rename(columns={'PLAYER_NAME_x':'MAIN_PLAYER_NAME', 'PLAYER_NAME_y':'OTHER_PLAYER_NAME', 'TEAM_ID_x':'TEAM_ID'})
+
+        player_correlations_filtered_wnames = pd.merge(player_correlations_filtered_wnames, teams_lookup,  how='left')
+        player_correlations_filtered_wnames['players'] = player_correlations_filtered_wnames[['MAIN_PLAYER_NAME', 'OTHER_PLAYER_NAME']].apply(lambda x: '_'.join(sorted(x)), axis=1)
+        player_correlations_filtered_wnames = player_correlations_filtered_wnames.drop_duplicates(subset='players')
+        player_correlations_filtered_wnames = player_correlations_filtered_wnames[['team_full_name','MAIN_PLAYER_NAME', 'OTHER_PLAYER_NAME', 'corr']]
+        player_correlations_filtered_wnames['corr'] = player_correlations_filtered_wnames['corr'].round(2)
+        player_correlations_filtered_wnames = player_correlations_filtered_wnames.sort_values('corr', ascending=False)
+
+        jscode = JsCode("""
+            function(params) {
+                if (params.data.corr >= 0.7) {
+                    return {
+                'color': 'grey',
+                'backgroundColor': '#abf7b1'
+                            }
+                        }
+                    };
+                    """)
+
+                    
+        col_defs_corr = [{'headerName':'Team', 'field':'team_full_name', 'width': 120},
+                        {'headerName':'Player', 'field':'MAIN_PLAYER_NAME', 'width':180},
+                        {'headerName':'Player', 'field':'OTHER_PLAYER_NAME', 'width':180},
+                        {'headerName':'Fantasy Point Correlation', 'field':'corr', 'width':180}]
+
+
+        gb_corr = GridOptionsBuilder.from_dataframe(player_correlations_filtered_wnames)
+        gridOptions_corr = gb_corr.build()
+        gridOptions_corr['getRowStyle'] = jscode
+        gridOptions_corr['columnDefs'] = col_defs_corr
+
+        grid_response = AgGrid(
+            player_correlations_filtered_wnames,
+            gridOptions=gridOptions_corr,
+            allow_unsafe_jscode=True,
+                )
+        with col3:
+            st.write(' ')
 
 #TEAM CORRELATIONS 
 
