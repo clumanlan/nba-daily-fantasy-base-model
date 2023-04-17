@@ -201,14 +201,12 @@ with tab1:
             st.plotly_chart(fig_a)
         
         with col2:
-            fig_b = px.scatter(filtered_base_df, x="GAME_DATE_EST_x", y="fantasy_points", opacity=0.5)
+            fig_b = px.scatter(filtered_base_df, x="GAME_DATE_EST_x", y="fantasy_points",trendline="ols", opacity=0.5)
             fig_b.update_layout(
-                title='Player Fantasy Point Actual over Time',
+                title='Player Fantasy Point Actual Over Time',
                 xaxis_title='Game Date',
                 yaxis_title='Fantasy Points'
             )
-
-            fig_b.update_traces(trendline="ols")
 
             st.plotly_chart(fig_b)
             
