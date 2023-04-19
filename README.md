@@ -14,7 +14,8 @@ For fantasy point predictions, we create both a Random Forest and Linear Regress
 ![alt text](https://lucid.app/publicSegments/view/0422e716-7a97-424d-8479-4fc30e19a408/image.png)
 <br>
 <br>
-We build the project with the following python scripts:
+The project consists of the following python scripts:
+-**0-get-initial-data:** Pulls boxscore data (including advanced stats) at the game, team and player level from [nba_api](https://github.com/swar/nba_api)
 
 
 ## Streamlit Dash
