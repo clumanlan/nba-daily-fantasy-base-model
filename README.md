@@ -1,12 +1,20 @@
 # NBA Daily Fantasy
 
-## Introduction: How to construct a winning lineup
- the problem is twofold: only a few win and those that do win hav
+## Introduction
+Creating a winning NBA fantasy lineup requires both: (accurate) fantasy point predictions and a way to create a lineup that maximizes the chances of winning. 
 <br>
 <br>
-* (plot) spread of winners and payout for two different contests
-* (plot) optimal fantasy point lineup expected outcome based on rolling averages, if you assume a normal distribution given the average: the max would be: (obviously this is for simplicity you would have to take multiple draws, just to visualize for now)
+For fantasy point predictions, we create both a Random Forest and Linear Regression that predicts fantasy points based on rolling lagged player and team stats. We use these fantasy point predictions in the optimization and also require the constraint that at least two correlated players are included in the lineup in order to increase variance thereby increasing the upper range of total expected fantasy points for the lineup.
+<br>
+<br>
 
 
-## Data Flow
-![alt text](https://lucid.app/publicSegments/view/e4cb6406-6e6f-47c5-b981-16e16820f2ba/image.png)
+## Codebase
+### Data Flow
+![alt text](https://lucid.app/publicSegments/view/0422e716-7a97-424d-8479-4fc30e19a408/image.png)
+<br>
+<br>
+We build the project with the following python scripts:
+
+
+## Streamlit Dash
