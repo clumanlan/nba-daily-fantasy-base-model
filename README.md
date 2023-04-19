@@ -16,6 +16,6 @@ For fantasy point predictions, we create both a Random Forest and Linear Regress
 <br>
 The project consists of the following python scripts:
 <br>
--**0-get-initial-data:** Pulls boxscore data (including advanced stats) at the game, team and player level from [nba_api](https://github.com/swar/nba_api)
+- **0-get-initial-data:** Pulls boxscore data (including advanced stats) at the game, team and player level from [nba_api](https://github.com/swar/nba_api)
 
 ## Streamlit Dash
