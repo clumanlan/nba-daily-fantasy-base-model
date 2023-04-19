@@ -81,8 +81,7 @@ game_headers_df_processed = (game_headers_df
 
     )
 )
-game_headers_df_processed.drop_duplicates(subset=['GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID'], inplace=True)
-
+game_headers_df_processed = game_headers_df_processed.drop_duplicates(subset=['GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID'])
 
 rel_cols = ['GAME_ID', 'game_type', 'SEASON', 'GAME_DATE_EST', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID', 'HOME_TEAM_WINS', 'HOME_TEAM_LOSSES']
 
@@ -101,7 +100,6 @@ boxscore_trad_player_df = wr.s3.read_parquet(
 boxscore_trad_player_df['GAME_ID'] = boxscore_trad_player_df['GAME_ID'].astype(str)
 
 boxscore_trad_team_path = "s3://nbadk-model/team_stats/boxscore_traditional/"
-
 boxscore_trad_team_df = wr.s3.read_parquet(
     path=boxscore_trad_team_path,
     path_suffix = ".parquet" ,
@@ -109,10 +107,9 @@ boxscore_trad_team_df = wr.s3.read_parquet(
 )
 
 boxscore_trad_team_df['GAME_ID'] = boxscore_trad_team_df['GAME_ID'].astype(str)
-boxscore_trad_team_df.drop_duplicates(subset=['GAME_ID', 'TEAM_ID'], inplace=True)
+boxscore_trad_team_df = boxscore_trad_team_df.drop_duplicates(subset=['GAME_ID', 'TEAM_ID'])
 
 boxscore_adv_player_path = "s3://nbadk-model/player_stats/boxscore_advanced/"
-
 boxscore_adv_player_df = wr.s3.read_parquet(
     path=boxscore_adv_player_path,
     path_suffix = ".parquet" ,
@@ -122,7 +119,6 @@ boxscore_adv_player_df = wr.s3.read_parquet(
 boxscore_adv_player_df = boxscore_adv_player_df.drop_duplicates(subset=['GAME_ID','PLAYER_ID'])
 
 boxscore_adv_team_path = "s3://nbadk-model/team_stats/boxscore_advanced/"
-
 boxscore_adv_team_df = wr.s3.read_parquet(
     path=boxscore_adv_team_path,
     path_suffix = ".parquet" ,
@@ -137,10 +133,9 @@ game_home_away = pd.melt(game_home_away, id_vars='GAME_ID', value_name='TEAM_ID'
 game_home_away['home_away'] = game_home_away['home_away'].apply(lambda x: 'home' if x == 'HOME_TEAM_ID' else 'away')
 
 
-# JOIN TABLES TO CREATE 2 DFS at the PLAYER AND TEAM LEVEL -----------------------------------------------------------
+# Merge tables to create two dataframes at the player and team level  -----------------------------------------------------------
 
 # Player Level DF -------------------
-
 # Merge the player info dataframe to add player positions
 boxscore_complete_player = pd.merge(boxscore_trad_player_df, player_info_df, on='PLAYER_ID', how='left')
 
@@ -161,7 +156,6 @@ boxscore_complete_player = pd.merge(boxscore_complete_player, game_info_df, on='
 boxscore_complete_player = boxscore_complete_player[~boxscore_complete_player['game_type'].isin(['Pre-Season', 'All Star'])]
 
 # Shawn Marion plays in two games in the 2007 season so we remove the one with less stats
-
 boxscore_complete_player[(boxscore_complete_player['PLAYER_ID']==1890) & (boxscore_complete_player['GAME_DATE_EST']=='2007-12-19')]
 shawn_marion_index_to_drop = boxscore_complete_player[(boxscore_complete_player['PLAYER_ID']==1890) & (boxscore_complete_player['GAME_ID']=='0020700367')].index
 boxscore_complete_player = boxscore_complete_player.drop(shawn_marion_index_to_drop[0])
@@ -333,28 +327,6 @@ boxscore_complete_player_processed = pd.merge(boxscore_complete_player_processed
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Create Team Level Features ------------------------------------------------------------------------ 
 boxscore_complete_team['seconds_played'] = boxscore_complete_team['MIN'].apply(get_sec)
 
@@ -477,7 +449,6 @@ wr.s3.to_parquet(
     )
 
 
-
 combined_player_team_boxscore = wr.s3.read_parquet(
         path=f's3://nbadk-model/processed/base_model_processed/initial.parquet'
         )
@@ -549,11 +520,10 @@ def eval_metrics(actual, pred):
 
 
 # Filter data to train model
-full_data = combined_player_team_boxscore[['SEASON_ID', 'GAME_DATE_EST','fantasy_points'] + num_cols + cat_cols_high_card + cat_cols_low_card]
+full_data = combined_player_team_boxscore[['SEASON_ID', 'GAME_ID', 'GAME_DATE_EST', 'PLAYER_NAME', 'fantasy_points'] + num_cols + cat_cols_high_card + cat_cols_low_card]
 
 # Drop NAs that happen as a result of lagging variables
 full_data = full_data.dropna(axis=0) 
-
 
 
 # Setup Mlflow ------------------------------------------------
@@ -569,7 +539,7 @@ mlflow.set_experiment(exp_name)
 
 # EXPERIMENT TRAIN MODEL  ----------------------------------------------------------------------
 models = [
-    ("RandomForest", RandomForestRegressor(n_estimators=5, max_features=0.3, min_samples_leaf=0.05, n_jobs=-1, random_state=0)),
+    #("RandomForest", RandomForestRegressor(n_estimators=5, max_features=0.3, min_samples_leaf=0.05, n_jobs=-1, random_state=0)),
     ("LinearRegression", LinearRegression())
 ]
 
@@ -577,7 +547,7 @@ train = full_data[full_data['SEASON_ID'] < 2019]
 test = full_data[full_data['SEASON_ID'] >= 2019]
 
 X_train = train.drop(['fantasy_points'], axis=1)
-y_train = train['fantasy_points']
+y_train = np.sqrt(train['fantasy_points'] + 3)
 
 col_trans_pipeline = ColumnTransformer(
     transformers=[
@@ -592,7 +562,9 @@ col_trans_pipeline = ColumnTransformer(
 tscv = TimeSeriesSplit(n_splits=5)
 
 for model_name, model in models:
-    with mlflow.start_run(run_name=model_name) as run:
+    with mlflow.start_run() as run:
+        
+        model_name_tag = 'linear_regression_base_sqrt_outcome_variable'
 
         pipeline = Pipeline(steps=[
             ('preprocess', col_trans_pipeline),
@@ -606,7 +578,7 @@ for model_name, model in models:
         y_train_pred = pipeline.predict(X_train) 
         (rmse, mae, r2) = eval_metrics(y_train, y_train_pred)
 
-        mlflow.set_tag('mlflow.runName', model_name) # set tag with run name so we can search for it later
+        mlflow.set_tag('mlflow.runName', model_name_tag) # set tag with run name so we can search for it later
 
         mlflow.log_metric('rmse', rmse)
         mlflow.log_metric('mae', mae)
@@ -614,16 +586,15 @@ for model_name, model in models:
         mlflow.log_metric('cross_val_score_avg', cross_val_scores.mean())
         mlflow.log_metric('cross_val_score_rmse', np.mean(np.sqrt(np.abs(cross_val_score_mean_sqaured_error))))
         
-        mlflow.sklearn.log_model(pipeline, model_name)
+        mlflow.sklearn.log_model(pipeline, model_name_tag)
 
 
-# Check out feature importance
-
-cat_cols_low_card_fit = lr_base['preprocess'].transformers_[3][1].named_steps['encoder'].get_feature_names_out(cat_cols_low_card)
+# Examine feature importance
+cat_cols_low_card_fit = pipeline['preprocess'].transformers_[3][1].named_steps['encoder'].get_feature_names_out(cat_cols_low_card)
 cat_cols_low_card_fit = list(cat_cols_low_card_fit)
 
 
-coef = lr_base['model'].coef_
+coef = pipeline['model'].coef_
 feats = date_feats + num_cols + cat_cols_high_card + cat_cols_low_card_fit
 coef_df = pd.DataFrame({'features':feats, 'coef': coef})
 coef_df.sort_values('coef')
@@ -631,8 +602,26 @@ coef_df.sort_values('coef')
 
 
 
+# Check for heterodasticity 
+
+
+y_train_pred
+mse = mean_squared_error(y_train, y_train_pred)
+residuals = y_train - y_train_pred
+plt.scatter(y_train_pred, residuals)
+plt.title("Residuals vs. Predicted Values")
+plt.xlabel("Predicted Values")
+plt.ylabel("Residuals")
+plt.show()
+
+
+y_train_transformed = np.sqrt(y_train)
+plt.hist(y_train_transformed)
+
+
+
+
 # Re-train on all data ------------------------------------------
- 
 X_all = full_data.drop(['fantasy_points'], axis=1)
 y_all = full_data['fantasy_points']
 
@@ -661,19 +650,24 @@ with mlflow.start_run():
     # Save the model as an artifact
     mlflow.sklearn.log_model(lr_pipeline, "lr_base_model")
 
-lr_base_path = 'C:\Users\Carlyle Lumanlan\projects\nba-daily-fantasy-base-model\mlruns\0\4fa9bfc29b314539928b8e89716a47ff\artifacts\lr_base_model'
 
 #mlflow.sklearn.save_model(lr_pipeline, path='projects/nba-daily-fantasy-base-model/base_model/lr_base')
 
 
-mlflow.sklearn.load_model(lr_pipeline, path='projects/nba-daily-fantasy-base-model/base_model/lr_base')
+lr_pipeline = mlflow.sklearn.load_model(model_uri='projects/nba-daily-fantasy-base-model/base_model/lr_base')
 
 
-X_all['preds'] = lr_pipeline.predict(X_all)
-X_all = X_all.rename(columns={'preds':'fantasy_point_prediction'})
+X_all['fantasy_point_prediction'] = lr_pipeline.predict(X_all)
+
+filtered_cols = [ 'GAME_ID','GAME_DATE_EST', 'SEASON_ID','PLAYER_ID', 'PLAYER_NAME',
+                 'TEAM_ID', 'fantasy_point_prediction']
+
+X_all_filtered = X_all[filtered_cols]
+
+
 
 wr.s3.to_parquet(
-        df=X_all,
+        df=X_all_filtered,
         path=f's3://nbadk-model/predictions/base/linear_regression/nba_base_lr_pred_initial.parquet'
         )
 
