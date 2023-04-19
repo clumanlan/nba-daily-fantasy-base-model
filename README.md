@@ -11,6 +11,8 @@ For fantasy point predictions, we create both a Random Forest and Linear Regress
 ## Codebase
 ### Data Flow
 ![alt text][(https://lucid.app/publicSegments/view/625cbb2f-9e93-4da1-a803-9f78ebb86ea4/image.png)
+<br>
+We build the project with the following python scripts:
 
 
 ## Streamlit Dash
