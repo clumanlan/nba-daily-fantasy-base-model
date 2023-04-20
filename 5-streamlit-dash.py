@@ -24,7 +24,7 @@ def load_and_prep_data():
     teams_lookup['TEAM_ID'] = teams_lookup['TEAM_ID'].astype(str)
 
     # Get today's date
-    today = date.today().strftime('%Y-%m-%d')
+    today = '2023-04-12' # hard code for now 
 
     # Read in processed data 
     processed_path = f's3://nbadk-model/processed/base_model_processed/nba_base_processed_{today}.parquet'
@@ -68,7 +68,7 @@ def load_and_prep_data():
 
     return teams_lookup, base_model_processed, player_pred_latest, player_correlations, dk_salaries_today
 
-teams_lookup, base_model_processed, player_pred_latest, player_correlations, dk_salaries_today= load_and_prep_data()
+teams_lookup, base_model_processed, player_pred_latest, player_correlations, dk_salaries_today = load_and_prep_data()
 
 
 # Main Page -------------------------------------------------------------------
