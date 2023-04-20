@@ -66,9 +66,9 @@ def load_and_prep_data():
         use_threads=True
     )
 
-    return teams_lookup, base_model_processed, player_pred_latest, player_correlations
+    return teams_lookup, base_model_processed, player_pred_latest, player_correlations, dk_salaries_today
 
-teams_lookup, base_model_processed, player_pred_latest, player_correlations = load_and_prep_data()
+teams_lookup, base_model_processed, player_pred_latest, player_correlations, dk_salaries_today= load_and_prep_data()
 
 
 # Main Page -------------------------------------------------------------------
