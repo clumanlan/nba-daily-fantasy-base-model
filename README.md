@@ -25,3 +25,9 @@ The project consists of the following python scripts:
 
 
 ## Streamlit Dash
+ [NBA Daily Fantasy Model Dash](https://clumanlan-nba-daily-fantasy-base-model-5-streamlit-dash-p293dc.streamlit.app/)
+<br>
+![alt text](images/nba-base-model-streamlit-dash.png)
+
+
+
