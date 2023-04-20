@@ -35,13 +35,12 @@ base_model_processed = base_model_processed[['PLAYER_NAME', 'PLAYER_ID', 'GAME_I
 base_model_processed = base_model_processed.drop_duplicates()
 
 # Read in predictions
-pred_path = f's3://nbadk-model/predictions/base/linear_regression/'
+pred_path = f's3://nbadk-model/predictions/base/linear_regression/nba_base_lr_pred_2023-04-12.parquet'
 player_pred = wr.s3.read_parquet(
         path=pred_path,
-        path_suffix = ".parquet" ,
         use_threads =True
     )
-
+player_pred
 # Read in draftkings salaries
 dk_salaries_path = f's3://nbadk-model/draftkings/roster-salaries/DKSalaries_2023-04-12.csv'
 dk_salaries_today =  wr.s3.read_csv(
