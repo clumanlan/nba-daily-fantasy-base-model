@@ -42,8 +42,9 @@ def load_and_prep_data():
         use_threads=True
     )
     player_pred_rel_cols = ['PLAYER_ID', 'PLAYER_NAME', 'POSITION', 'is_starter', 'fantasy_point_prediction', 'player_fantasy_points_rank_overall_lagged']
-    player_pred_latest = player_pred[player_pred['GAME_DATE_EST'] == today][player_pred_rel_cols]
-    
+    player_pred['GAME_DATE_EST'] = pd.to_datetime(player_pred['GAME_DATE_EST'])
+    player_pred_latest = player_pred[player_pred['GAME_DATE_EST'].dt.strftime('%Y-%m-%d') == today][player_pred_rel_cols]
+
     # Read in draftkings salaries
     dk_salaries_path = f's3://nbadk-model/draftkings/roster-salaries/DKSalaries_{today}.csv'
     dk_salaries_today =  wr.s3.read_csv(
@@ -150,7 +151,6 @@ with tab1:
 
         final_lineup = pd.DataFrame({"PLAYER_ID":player_ids,"Status":player_lineup_status})
         final_lineup = final_lineup[final_lineup["Status"]==1].join(player_pred_latest_filtered, on = 'PLAYER_ID', how='left')
-
 
         final_lineup = final_lineup.drop(columns=['PLAYER_ID', 'Status', 'ID', 'Roster Position'], axis=1)
         final_lineup['fantasy_point_prediction'] =  final_lineup['fantasy_point_prediction'].round()
@@ -307,7 +307,3 @@ with tab2:
         
         with col3:
             st.write(' ')
-
-#TEAM CORRELATIONS 
-
-
