@@ -23,15 +23,10 @@ teams_lookup['TEAM_ID'] = teams_lookup['TEAM_ID'].astype(str)
 
 today = date.today().strftime('%Y-%m-%d')
 
-# Authenticate with AWS
-wrangler_cfg = wr.config.update(
-    {
-        "aws": {
-            "access_key": st.secrets['aws_access_key_id'],
-            "secret_key": st.secrets['aws_secret_access_key']
-        }
-    }
-)
+wr.config.s3 = {"aws_access_key_id": st.secrets['access_key_id'],
+                "aws_secret_access_key": st.secrets['secret_access_key'],
+                "region_name": "us-east-2"}
+
 # read in processed data 
 processed_path = f's3://nbadk-model/processed/base_model_processed/nba_base_processed_2023-04-12.parquet'
 base_model_processed = wr.s3.read_parquet(
