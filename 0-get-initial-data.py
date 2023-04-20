@@ -230,9 +230,11 @@ def get_player_info(player_ids):
 
     return error_player_info_df
 
+def main():
+    game_ids = get_game_header_n_line_score(start_date='2001-01-01')
+    player_ids, boxscore_trad_error_list = get_boxscore_traditional(game_ids)
+    boxscore_adv_error_list = get_boxscore_advanced(game_ids)
+    error_player_info_df = get_player_info(player_ids)
 
-game_ids = get_game_header_n_line_score(start_date='2001-01-01')
-
-player_ids, boxscore_trad_error_list = get_boxscore_traditional(game_ids)
-boxscore_adv_error_list = get_boxscore_advanced(game_ids)
-error_player_info_df = get_player_info(player_ids)
+if __name__ == '__main__':
+    main()

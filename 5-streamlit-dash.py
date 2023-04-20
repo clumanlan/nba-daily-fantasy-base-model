@@ -11,11 +11,9 @@ import jinja2
 import plotly_express as px
 import urllib3
 from nba_api.stats.static import teams
+from PIL import Image
 
-# allow only to select one in the filter
-# center align
 # add documentation
-# add a filter to force include or exclude somebody
 
 # Load and prep data -------------------------------------------------------
 teams_lookup = pd.DataFrame(teams.get_teams())
@@ -75,12 +73,18 @@ player_pred_latest = pd.merge(player_pred_latest, dk_salaries_today, how='inner'
 player_pred_latest['Roster Position'] = player_pred_latest['Roster Position'].astype(str)
 
 
+
 st.set_page_config(page_title="Current Fantasy Lineup", layout="wide") 
 
+# Sidebar --------------------------------------------------------------
+
+# Main Page -------------------------------------------------------------------
 tab1, tab2 = st.tabs(["Current Lineup", "Player Correlations"])
 
+# Tab 1 --------------------------------------------------------------------
 with tab1: 
-    col1, col2, col3 = st.columns([1, 3, 1])
+
+    col1, col2, col3 = st.columns([1, 7, 1])
 
     with col1:
         st.write(' ')
@@ -88,6 +92,11 @@ with tab1:
     with col2:
             
         st.title("Current Fantasy Lineup")
+        st.write('Generate a fantasy lineup based on both individual player fantasy point predictions and the correlation between players\' fantasy points.', font="italic")
+        st.markdown("""
+        - <b>Step 1:</b> Exclude players and the lineup optimization will automatically rerun (often times there are player's ruled out right before gametime)
+        - <b>Step 2:</b> Select a player and visualize the distribution of a player's fantasy points and fantasy point trend over time.
+        """, unsafe_allow_html=True)
 
         # Optimization ---------------------------------------
 
@@ -182,33 +191,70 @@ with tab1:
             
         selected_rows_df = pd.DataFrame(selected_rows)
         player_selected = selected_rows_df['PLAYER_NAME']
-
-        filtered_base_df = base_model_processed[base_model_processed["PLAYER_NAME"].isin(player_selected)][['PLAYER_NAME','GAME_DATE_EST_x','fantasy_points']]
-        
         player_selected_var = player_selected.iloc[0]
-        st.write(f"<h1 style='text-align: center; font-weight: bold; font-size: 24px;'>{player_selected_var}</h1>", unsafe_allow_html=True)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_a = px.histogram(filtered_base_df["fantasy_points"], nbins=30, opacity=0.5)
-            fig_a.update_layout(
-                title='Player Fantsay Point Actual Histogram',
-                xaxis_title='Fantasy Poimts',
-                yaxis_title='Observations',
-                yaxis=dict(dtick=1)
-            )
-
-            st.plotly_chart(fig_a)
+    
+    else: 
+        player_selected = ['Alex Caruso']
+        player_selected_var = 'Alex Caruso'
         
-        with col2:
-            fig_b = px.scatter(filtered_base_df, x="GAME_DATE_EST_x", y="fantasy_points",trendline="ols", opacity=0.5)
-            fig_b.update_layout(
-                title='Player Fantasy Point Actual Over Time',
-                xaxis_title='Game Date',
-                yaxis_title='Fantasy Points'
-            )
 
-            st.plotly_chart(fig_b)
+    filtered_base_df = base_model_processed[base_model_processed["PLAYER_NAME"].isin(player_selected)][['PLAYER_NAME','GAME_DATE_EST_x','fantasy_points']]
+        
+    st.write(f"<h1 style='text-align: center; font-weight: bold; font-size: 24px;'>{player_selected_var}</h1>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_a = px.histogram(filtered_base_df["fantasy_points"], nbins=30, opacity=0.5)
+        fig_a.update_layout(
+            title='Player Fantsay Point Actual Histogram',
+            xaxis_title='Fantasy Poimts',
+            yaxis_title='Observations',
+            yaxis=dict(dtick=1)
+        )
+
+        st.plotly_chart(fig_a)
+        
+    with col2:
+        fig_b = px.scatter(filtered_base_df, x="GAME_DATE_EST_x", y="fantasy_points",trendline="ols", opacity=0.5)
+        fig_b.update_layout(
+            title='Player Fantasy Point Actual Over Time',
+            xaxis_title='Game Date',
+            yaxis_title='Fantasy Points'
+        )
+
+        st.plotly_chart(fig_b)
+    
+    col1, col2, col3 = st.columns([1, 6, 1])
+
+    with col1:
+        st.write(' ')
+    
+    with col2:
+  
+        st.info("Read more about how the model works and see the code on my [Github](https://github.com/clumanlan/nba-daily-fantasy-base-model).", icon="ℹ️")
+
+    with col3:
+        st.write(' ')
+
+
+    col1, col2, col3 = st.columns([1, 3, 1])
+
+    with col1:
+        st.write(' ')
+    
+    with col2:
+        st.write(' ')
+  
+    with col3:
+        
+        img = Image.open("images/bball-fp-logo.jpg")
+        # Resize image
+        width, height = img.size
+        new_height = 100
+        new_width = int(new_height * (width / height))
+        resized_img = img.resize((new_width, new_height))
+        st.image(resized_img)
+
             
 
 with tab2:
@@ -265,6 +311,7 @@ with tab2:
             gridOptions=gridOptions_corr,
             allow_unsafe_jscode=True,
                 )
+        
         with col3:
             st.write(' ')
 
