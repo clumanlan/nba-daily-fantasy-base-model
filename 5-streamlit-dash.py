@@ -16,67 +16,60 @@ import boto3
 
 st.set_page_config(page_title="Current Fantasy Lineup", layout="wide") 
 
-# Load and prep data -------------------------------------------------------
-teams_lookup = pd.DataFrame(teams.get_teams())
-teams_lookup = teams_lookup[['id', 'full_name']]
-teams_lookup = teams_lookup.rename(columns={'id':'TEAM_ID', 'full_name':'team_full_name'})
-teams_lookup['TEAM_ID'] = teams_lookup['TEAM_ID'].astype(str)
+def load_and_prep_data():
+    # Load teams lookup data
+    teams_lookup = pd.DataFrame(teams.get_teams())
+    teams_lookup = teams_lookup[['id', 'full_name']]
+    teams_lookup = teams_lookup.rename(columns={'id':'TEAM_ID', 'full_name':'team_full_name'})
+    teams_lookup['TEAM_ID'] = teams_lookup['TEAM_ID'].astype(str)
 
-today = date.today().strftime('%Y-%m-%d')
+    # Get today's date
+    today = date.today().strftime('%Y-%m-%d')
 
-
-# read in processed data 
-processed_path = f's3://nbadk-model/processed/base_model_processed/nba_base_processed_2023-04-12.parquet'
-base_model_processed = wr.s3.read_parquet(
+    # Read in processed data 
+    processed_path = f's3://nbadk-model/processed/base_model_processed/nba_base_processed_{today}.parquet'
+    base_model_processed = wr.s3.read_parquet(
         path=processed_path,
-        use_threads =True
+        use_threads=True
     )
+    base_model_processed = base_model_processed[['PLAYER_NAME', 'PLAYER_ID', 'GAME_ID', 'GAME_DATE_EST_x', 'is_starter', 'fantasy_points']]
+    base_model_processed = base_model_processed.drop_duplicates()
 
-base_model_processed = base_model_processed[['PLAYER_NAME', 'PLAYER_ID', 'GAME_ID', 'GAME_DATE_EST_x', 'is_starter', 'fantasy_points']]
-base_model_processed = base_model_processed.drop_duplicates()
-
-# Read in predictions
-pred_path = f's3://nbadk-model/predictions/base/linear_regression/nba_base_lr_pred_2023-04-12.parquet'
-player_pred = wr.s3.read_parquet(
+    # Read in predictions
+    pred_path = f's3://nbadk-model/predictions/base/linear_regression/nba_base_lr_pred_{today}.parquet'
+    player_pred = wr.s3.read_parquet(
         path=pred_path,
-        use_threads =True
+        use_threads=True
     )
-player_pred
-# Read in draftkings salaries
-dk_salaries_path = f's3://nbadk-model/draftkings/roster-salaries/DKSalaries_2023-04-12.csv'
-dk_salaries_today =  wr.s3.read_csv(
-        path = dk_salaries_path,
-        path_suffix = ".csv" ,
-        use_threads =True
+    player_pred_rel_cols = ['PLAYER_ID', 'PLAYER_NAME', 'POSITION', 'is_starter', 'fantasy_point_prediction', 'player_fantasy_points_rank_overall_lagged']
+    player_pred_latest = player_pred[player_pred['GAME_DATE_EST'] == today][player_pred_rel_cols]
+    
+    # Read in draftkings salaries
+    dk_salaries_path = f's3://nbadk-model/draftkings/roster-salaries/DKSalaries_{today}.csv'
+    dk_salaries_today =  wr.s3.read_csv(
+        path=dk_salaries_path,
+        path_suffix=".csv",
+        use_threads=True
     )
+    dk_salaries_today = dk_salaries_today[['Roster Position', 'Name', 'ID', 'Salary', 'AvgPointsPerGame']]
+    dk_salaries_today.rename({'Name':'PLAYER_NAME'}, axis=1, inplace=True)
 
-dk_salaries_today = dk_salaries_today[['Roster Position', 'Name', 'ID', 'Salary', 'AvgPointsPerGame']]
-dk_salaries_today.rename({'Name':'PLAYER_NAME'},axis=1, inplace=True)
+    # Merge predictions with salaries
+    player_pred_latest = pd.merge(player_pred_latest, dk_salaries_today, how='inner')
+    player_pred_latest['Roster Position'] = player_pred_latest['Roster Position'].astype(str)
 
-# Read in player correlations
-player_correlation_path = f's3://nbadk-model/processed/correlations/rolling/player/nba_player_correlations_2023-04-12.parquet'
-player_correlations = wr.s3.read_parquet(
+    # Read in player correlations
+    player_correlation_path = f's3://nbadk-model/processed/correlations/rolling/player/nba_player_correlations_{today}.parquet'
+    player_correlations = wr.s3.read_parquet(
         path=player_correlation_path,
-        path_suffix = ".parquet" ,
-        use_threads =True
+        path_suffix=".parquet",
+        use_threads=True
     )
 
-# Get today's predictions 
-player_pred['GAME_DATE_EST'] = pd.to_datetime(player_pred['GAME_DATE_EST'])
-latest_pred_date = player_pred['GAME_DATE_EST'].max()
+    return teams_lookup, base_model_processed, player_pred_latest, player_correlations
 
-player_pred_rel_cols = ['PLAYER_ID', 'PLAYER_NAME', 'POSITION', 'is_starter', 'fantasy_point_prediction',
-                        'player_fantasy_points_rank_overall_lagged']
+teams_lookup, base_model_processed, player_pred_latest, player_correlations = load_and_prep_data()
 
-player_pred_latest = player_pred[player_pred['GAME_DATE_EST']=='2023-04-12'][player_pred_rel_cols]
-
-player_pred_latest = pd.merge(player_pred_latest, dk_salaries_today, how='inner')
-player_pred_latest['Roster Position'] = player_pred_latest['Roster Position'].astype(str)
-
-
-
-
-# Sidebar --------------------------------------------------------------
 
 # Main Page -------------------------------------------------------------------
 tab1, tab2 = st.tabs(["Current Lineup", "Player Correlations"])
