@@ -13,7 +13,8 @@ import urllib3
 from nba_api.stats.static import teams
 from PIL import Image
 import boto3
-# add documentation
+
+st.set_page_config(page_title="Current Fantasy Lineup", layout="wide") 
 
 # Load and prep data -------------------------------------------------------
 teams_lookup = pd.DataFrame(teams.get_teams())
@@ -74,7 +75,6 @@ player_pred_latest['Roster Position'] = player_pred_latest['Roster Position'].as
 
 
 
-st.set_page_config(page_title="Current Fantasy Lineup", layout="wide") 
 
 # Sidebar --------------------------------------------------------------
 
