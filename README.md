@@ -1,10 +1,10 @@
 # NBA Daily Fantasy
 
-## Codebase
-### Data Flow
+## Data Flow
 ![alt text](https://lucid.app/publicSegments/view/0422e716-7a97-424d-8479-4fc30e19a408/image.png)
 <br>
 <br>
+### Codebase
 The project consists of the following python scripts:
 <br>
 - **0-get-initial-data:** Pulls initial boxscore data (including advanced stats) starting from 2001 at the game, team and player level from [nba_api](https://github.com/swar/nba_api).
