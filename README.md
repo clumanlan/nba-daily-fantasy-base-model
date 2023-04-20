@@ -3,6 +3,7 @@
 ## Introduction
 The first attempt to automate creating a winning NBA fantasy lineup.
 <br>
+<br>
 Building an NBA fantasy lineup requires both: (ideally accurate) fantasy point predictions and a way to create a lineup that maximizes the chances of winning. 
 <br>
 <br>
