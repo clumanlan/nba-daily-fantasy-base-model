@@ -290,6 +290,31 @@ rel_num_cols_add = ['fantasy_points_rank_overall', 'rolling_games_played']
 
 add_player_lagged_stats = lag_player_values(boxscore_complete_player_processed, rel_num_cols_add)
 
+# add seconds_played average lagged so we can filter out data in a few different ways
+
+
+boxscore_complete_player_processed['seconds_played_rolling_3game_avg_lag'] = (
+    boxscore_complete_player_processed
+    .sort_values(['GAME_DATE_EST'])
+    .groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'])['seconds_played']
+    .rolling(window=3)
+    .mean()
+    .reset_index(level=[0,1,2], drop=True)
+    )
+
+boxscore_complete_player_processed['seconds_played_rolling_3game_avg_lag'] = boxscore_complete_player_processed.sort_values(['GAME_DATE_EST']).groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'])['seconds_played_rolling_3game_avg_lag'].shift(1)
+
+boxscore_complete_player_processed['seconds_played_rolling_5game_avg_lag'] = (
+    boxscore_complete_player_processed
+    .sort_values(['GAME_DATE_EST'])
+    .groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'])['seconds_played']
+    .rolling(window=5)
+    .mean()
+    .reset_index(level=[0,1,2], drop=True)
+    )
+
+boxscore_complete_player_processed['seconds_played_rolling_5game_avg_lag'] = boxscore_complete_player_processed.sort_values(['GAME_DATE_EST']).groupby(['PLAYER_ID', 'PLAYER_NAME', 'SEASON_ID'])['seconds_played_rolling_5game_avg_lag'].shift(1)
+
 
 # Define basic statistics we pull of stats
 def create_aggregate_rolling_functions(window_num = 20, window_min = 1):
@@ -469,12 +494,12 @@ del boxscore_complete_player_processed, boxscore_complete_team_processed
 
 wr.s3.to_parquet(
         df=combined_player_team_boxscore,
-        path="s3://nbadk-model/processed/base_model_processed/initial.parquet"
+        path="s3://nbadk-model/processed/base_model_processed/initial_updated.parquet"
     )
 
 
 combined_player_team_boxscore = wr.s3.read_parquet(
-        path=f's3://nbadk-model/processed/base_model_processed/initial.parquet'
+        path=f's3://nbadk-model/processed/base_model_processed/initial_updated.parquet'
         )
 
 # TRANSFORMERS ------------------------------------------------------------------
@@ -558,9 +583,12 @@ player_boxscore_filtered = player_boxscore_filtered.drop('MIN', axis=1)
 full_data = full_data.merge(player_boxscore_filtered, how='left')
 
 # filter out players who play two minutes of garbage time 
-full_data = full_data[full_data['seconds_played'] > 120]
+full_data = full_data[full_data['seconds_played'] > 1200]
 full_data = full_data.drop(['seconds_played'], axis=1)
 
+
+# create a feature that looks at average seconds played in last five games, then we can create bins on who we filter out?
+# rolling count of all games played
 
 # Setup Mlflow ------------------------------------------------
 ## mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root mlruns/ 
@@ -592,7 +620,7 @@ y_train = train['fantasy_points']
 
 y_train_log = np.log(train[['fantasy_points']] + 3)
 
-del full_data, combined_player_team_boxscore
+# del full_data, combined_player_team_boxscore
 
 col_trans_pipeline = ColumnTransformer(
     transformers=[
@@ -610,7 +638,7 @@ tscv = TimeSeriesSplit(n_splits=5)
 for model_name, model in models:
     with mlflow.start_run() as run:
         
-        model_name_tag = 'rf_filtered_out_players_playing_less_than_2_mins'
+        model_name_tag = 'rf_filtered_out_players_playing_more_than_20_mins'
 
         pipeline = Pipeline(steps=[
             ('preprocess', col_trans_pipeline),
@@ -634,6 +662,8 @@ for model_name, model in models:
         mlflow.log_metric('cross_val_score_rmse', np.mean(np.sqrt(np.abs(cross_val_score_mean_sqaured_error))))
         
         mlflow.sklearn.log_model(pipeline, model_name_tag)
+
+
 
 
 
