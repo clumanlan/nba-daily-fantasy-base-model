@@ -24,6 +24,17 @@ from category_encoders import TargetEncoder
 from sklearn.linear_model import LinearRegression
 import seaborn as sns
 import matplotlib.pyplot as plt
+import xgboost as xgb
+import statsmodels.api as sm
+
+# to do: 
+#   try xgboost
+#   try neurnal net
+#   visualize 100 random sample points
+#   figure out which model works better
+#   try shap/lime to figure out most important variables
+# extra:
+#   explicitly define what each column is tht is being pulled in (game header to start)
 
 # This function converts minutes played into total seconds --------------------
 def get_sec(time_str):
@@ -59,14 +70,25 @@ player_info_df = wr.s3.read_parquet(
 player_info_df = player_info_df[['PERSON_ID', 'HEIGHT', 'POSITION']].drop_duplicates()
 player_info_df = player_info_df.rename({'PERSON_ID': 'PLAYER_ID'}, axis=1)
 
+game_stats_path_initial = "s3://nbadk-model/game_stats/game_header/initial"
+game_stats_path_rolling = "s3://nbadk-model/game_stats/game_header/rolling"
 
-game_stats_path = "s3://nbadk-model/game_stats"
 
-game_headers_df = wr.s3.read_parquet(
-    path=game_stats_path,
+game_headers_initial_df = wr.s3.read_parquet(
+    path=game_stats_path_initial,
     path_suffix = ".parquet" ,
     use_threads =True
 )
+
+game_header_rolling_df = wr.s3.read_parquet(
+    path=game_stats_path_rolling,
+    path_suffix = ".parquet" ,
+    use_threads =True
+)
+
+
+game_headers_df = pd.concat([game_headers_initial_df, game_header_rolling_df])
+
 
 game_headers_df_processed = (game_headers_df
     .assign(
@@ -81,6 +103,7 @@ game_headers_df_processed = (game_headers_df
 
     )
 )
+
 game_headers_df_processed = game_headers_df_processed.drop_duplicates(subset=['GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID'])
 
 rel_cols = ['GAME_ID', 'game_type', 'SEASON', 'GAME_DATE_EST', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID', 'HOME_TEAM_WINS', 'HOME_TEAM_LOSSES']
@@ -266,6 +289,7 @@ def lag_player_values(df, rel_num_cols):
 rel_num_cols_add = ['fantasy_points_rank_overall', 'rolling_games_played']
 
 add_player_lagged_stats = lag_player_values(boxscore_complete_player_processed, rel_num_cols_add)
+
 
 # Define basic statistics we pull of stats
 def create_aggregate_rolling_functions(window_num = 20, window_min = 1):
@@ -525,6 +549,18 @@ full_data = combined_player_team_boxscore[['SEASON_ID', 'GAME_ID', 'GAME_DATE_ES
 # Drop NAs that happen as a result of lagging variables
 full_data = full_data.dropna(axis=0) 
 
+# add players seconds_played to filter out player's that only entered for 2 minutes
+
+player_boxscore_filtered = boxscore_trad_player_df[['GAME_ID', 'PLAYER_ID', 'MIN']]
+player_boxscore_filtered['seconds_played'] = player_boxscore_filtered['MIN'].apply(get_sec)
+player_boxscore_filtered = player_boxscore_filtered.drop('MIN', axis=1)
+
+full_data = full_data.merge(player_boxscore_filtered, how='left')
+
+# filter out players who play two minutes of garbage time 
+full_data = full_data[full_data['seconds_played'] > 120]
+full_data = full_data.drop(['seconds_played'], axis=1)
+
 
 # Setup Mlflow ------------------------------------------------
 ## mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root mlruns/ 
@@ -534,20 +570,29 @@ mlflow.set_tracking_uri(remote_server_uri)
 exp_name = 'nba_fantasy_regression'
 #mlflow.create_experiment(exp_name)
 
+
 mlflow.set_experiment(exp_name)
 
 
 # EXPERIMENT TRAIN MODEL  ----------------------------------------------------------------------
 models = [
-    #("RandomForest", RandomForestRegressor(n_estimators=5, max_features=0.3, min_samples_leaf=0.05, n_jobs=-1, random_state=0)),
-    ("LinearRegression", LinearRegression())
+    ("RandomForest", RandomForestRegressor(n_estimators=5, max_features=0.3, min_samples_leaf=0.05, n_jobs=-1, random_state=0))
+    #("LinearRegression", LinearRegression())
 ]
 
 train = full_data[full_data['SEASON_ID'] < 2019]
 test = full_data[full_data['SEASON_ID'] >= 2019]
 
+# sns.histplot(data=train, x='fantasy_points')
+
+
 X_train = train.drop(['fantasy_points'], axis=1)
-y_train = np.sqrt(train['fantasy_points'] + 3)
+y_train = train['fantasy_points']
+
+
+y_train_log = np.log(train[['fantasy_points']] + 3)
+
+del full_data, combined_player_team_boxscore
 
 col_trans_pipeline = ColumnTransformer(
     transformers=[
@@ -561,10 +606,11 @@ col_trans_pipeline = ColumnTransformer(
 
 tscv = TimeSeriesSplit(n_splits=5)
 
+
 for model_name, model in models:
     with mlflow.start_run() as run:
         
-        model_name_tag = 'linear_regression_base_sqrt_outcome_variable'
+        model_name_tag = 'rf_filtered_out_players_playing_less_than_2_mins'
 
         pipeline = Pipeline(steps=[
             ('preprocess', col_trans_pipeline),
@@ -577,33 +623,57 @@ for model_name, model in models:
         pipeline.fit(X_train, y_train)
         y_train_pred = pipeline.predict(X_train) 
         (rmse, mae, r2) = eval_metrics(y_train, y_train_pred)
-
+        adjusted_r2 = 1 - ( 1-r2 ) * (len(y_train) - 1 ) / ( len(y_train) - X_train.shape[1] - 1 )
         mlflow.set_tag('mlflow.runName', model_name_tag) # set tag with run name so we can search for it later
 
         mlflow.log_metric('rmse', rmse)
         mlflow.log_metric('mae', mae)
         mlflow.log_metric('r2', r2)
+        mlflow.log_metric('adjusted_r2', adjusted_r2)
         mlflow.log_metric('cross_val_score_avg', cross_val_scores.mean())
         mlflow.log_metric('cross_val_score_rmse', np.mean(np.sqrt(np.abs(cross_val_score_mean_sqaured_error))))
         
         mlflow.sklearn.log_model(pipeline, model_name_tag)
 
 
+
 # Examine feature importance
 cat_cols_low_card_fit = pipeline['preprocess'].transformers_[3][1].named_steps['encoder'].get_feature_names_out(cat_cols_low_card)
 cat_cols_low_card_fit = list(cat_cols_low_card_fit)
-
-
-coef = pipeline['model'].coef_
 feats = date_feats + num_cols + cat_cols_high_card + cat_cols_low_card_fit
+
+
+# LR feature importance
+coef = pipeline['model'].coef_
 coef_df = pd.DataFrame({'features':feats, 'coef': coef})
 coef_df.sort_values('coef')
+
+
+intercept = pipeline.named_steps['model'].intercept_
+coefficients = np.concatenate([[intercept], coef])
+
+X_train_transformed = col_trans_pipeline.fit_transform(X_train, y_train)
+X_train_with_intercept = sm.add_constant(X_train_transformed)
+
+# Create a OLS model and fit it to the data
+ols_model = sm.OLS(y_train, X_train_with_intercept)
+results = ols_model.fit()
+
+# Get the t-statistics and p-values
+t_statistics = results.tvalues
+
+
+
+
+
+feat_importances = pipeline['model'].feature_importances_
+feat_df = pd.DataFrame({'features':feats, 'feat_importance':feat_importances})
+feat_df.sort_values(by='feat_importance', ascending=False)
 
 
 
 
 # Check for heterodasticity 
-
 
 y_train_pred
 mse = mean_squared_error(y_train, y_train_pred)
@@ -617,6 +687,14 @@ plt.show()
 
 y_train_transformed = np.sqrt(y_train)
 plt.hist(y_train_transformed)
+
+
+
+
+
+
+
+
 
 
 
